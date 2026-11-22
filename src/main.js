@@ -23,14 +23,16 @@ app.querySelectorAll('[data-delete]').forEach(b=>b.onclick=async()=>{const book=
 const readerLabels = {
   he: {
     back: '↩ לספרייה', toc: 'תוכן עניינים', previous: 'הקודם', next: 'הבא',
-    close: 'סגור ✕', loading: 'טוען…', position: 'מיקום בספר',
+    close: 'סגור ✕', loading: 'טוען…', position: 'מחשב התקדמות…',
+    chapter: 'פרק', book: 'ספר', of: 'מתוך', approximately: 'כ־',
     smaller: 'הקטנת גופן', larger: 'הגדלת גופן', theme: 'שינוי ערכת צבעים',
     openError: 'לא ניתן לפתוח את הספר. ייתכן שהקובץ פגום או מוגן.',
     errorNotice: 'אירעה שגיאה בפתיחת הספר',
   },
   en: {
     back: '↩ Library', toc: 'Table of contents', previous: 'Previous', next: 'Next',
-    close: 'Close ✕', loading: 'Loading…', position: 'Reading position',
+    close: 'Close ✕', loading: 'Loading…', position: 'Calculating progress…',
+    chapter: 'Chapter', book: 'Book', of: 'of', approximately: '≈',
     smaller: 'Decrease font size', larger: 'Increase font size', theme: 'Toggle color theme',
     openError: 'Could not open this book. The file may be damaged or protected.',
     errorNotice: 'An error occurred while opening the book.',
@@ -59,7 +61,7 @@ async function getReaderLanguage(epub) {
 
 function shell(book, language = 'he'){const labels = readerLabels[language];app.innerHTML=`<div class="reader" lang="${language}" dir="${language === 'en' ? 'ltr' : 'rtl'}"><header class="reading-top"><button id="back">${labels.back}</button><strong dir="auto">${esc(book.title)}</strong><button id="toc" ${book.type==='pdf'?'hidden':''}>${labels.toc}</button></header>
 <div class="stage ${state.night?'night':''}"><div id="viewport" class="viewport">${labels.loading}</div></div>
-<footer class="controls"><div class="nav"><button id="prev" aria-label="${labels.previous}">${labels.previous}</button><span id="position">—</span><button id="next" aria-label="${labels.next}">${labels.next}</button></div><div class="settings"><button id="smaller" ${book.type === 'epub' ? `aria-label="${labels.smaller}"` : ''}>−</button><span id="size-label"></span><button id="larger" ${book.type === 'epub' ? `aria-label="${labels.larger}"` : ''}>＋</button><button id="theme" aria-label="${labels.theme}" ${book.type==='pdf'?'hidden':''}>◐</button></div></footer>
+<footer class="controls" ${book.type === 'epub' ? 'aria-describedby="position"' : ''}><div class="nav"><button id="prev" aria-label="${labels.previous}">${labels.previous}</button>${book.type === 'epub' ? '' : '<span id="position">—</span>'}<button id="next" aria-label="${labels.next}">${labels.next}</button></div><div class="settings"><button id="smaller" ${book.type === 'epub' ? `aria-label="${labels.smaller}"` : ''}>−</button><span id="size-label"></span><button id="larger" ${book.type === 'epub' ? `aria-label="${labels.larger}"` : ''}>＋</button><button id="theme" aria-label="${labels.theme}" ${book.type==='pdf'?'hidden':''}>◐</button></div>${book.type === 'epub' ? '<div id="position" class="epub-progress" role="status"></div>' : ''}</footer>
 <aside class="toc-panel" id="toc-panel" hidden><button id="close-toc">${labels.close}</button><h3>${labels.toc}</h3><div id="toc-list"></div></aside>
 </div><div id="notice" class="notice" hidden></div>`;
 app.querySelector('#back').onclick=closeBook;
@@ -73,10 +75,107 @@ const language = await getReaderLanguage(state.epub);
 if (state.token !== token) return;
 labels = readerLabels[language];
 shell(book, language);
-const view=app.querySelector('#viewport');view.replaceChildren();state.rendition=state.epub.renderTo(view,{width:'100%',height:'100%',flow:'paginated',spread:'none'});state.rendition.themes.register('paper',{body:{background:'#fffdf7 !important',color:'#302c28 !important'}});state.rendition.themes.register('night',{body:{background:'#20252b !important',color:'#f0eeee !important'}});state.rendition.themes.select(state.night?'night':'paper');state.rendition.themes.fontSize(state.font+'%');state.rendition.on('relocated',async loc=>{if(state.book?.id!==book.id)return;book.location=loc.start.cfi;book.progress='בקריאה';app.querySelector('#position').textContent=labels.position;await saveBook(book);});await state.rendition.display(book.location||undefined);if(state.token!==token)return;const navigation=await state.epub.loaded.navigation;if(state.token!==token)return;const toc=app.querySelector('#toc-list');toc.replaceChildren();for(const item of navigation.toc||[]){const b=document.createElement('button');b.textContent=item.label;b.dir='auto';b.style.textAlign='start';b.onclick=async()=>{app.querySelector('#toc-panel').hidden=true;await state.rendition.display(item.href);};toc.append(b);}}}catch(err){if(state.token!==token)return;console.error(err);app.querySelector('#viewport').textContent=labels.openError;message(labels.errorNotice);}}
+const view=app.querySelector('#viewport');view.replaceChildren();state.rendition=state.epub.renderTo(view,{width:'100%',height:'100%',flow:'paginated',spread:'none'});state.rendition.themes.register('paper',{body:{background:'#fffdf7 !important',color:'#302c28 !important'}});state.rendition.themes.register('night',{body:{background:'#20252b !important',color:'#f0eeee !important'}});state.rendition.themes.select(state.night?'night':'paper');state.rendition.themes.fontSize(state.font+'%');const progress = trackEpubProgress(state.epub, state.rendition, book, labels, token);
+state.epubProgress = progress;
+await state.rendition.display(book.location || undefined);
+progress.index();
+if(state.token!==token)return;const navigation=await state.epub.loaded.navigation;if(state.token!==token)return;const toc=app.querySelector('#toc-list');toc.replaceChildren();for(const item of navigation.toc||[]){const b=document.createElement('button');b.textContent=item.label;b.dir='auto';b.style.textAlign='start';b.onclick=async()=>{if (state.epubProgress.resizing) return;app.querySelector('#toc-panel').hidden=true;state.epubProgress.anchor = null;await state.rendition.display(item.href);};toc.append(b);}}}catch(err){if(state.token!==token)return;console.error(err);app.querySelector('#viewport').textContent=labels.openError;message(labels.errorNotice);}}
+function trackEpubProgress(epub, rendition, book, labels, token) {
+  const progress = {anchor: book.location, resizing: false};
+  const sections = new Map();
+  const output = app.querySelector('#position');
+  let location;
+  let locationCount = 0;
+
+  function update() {
+    if (!location?.start || token !== state.token) return;
+    const {cfi, index, displayed} = location.start;
+    const anchor = progress.anchor || cfi;
+    const section = sections.get(index);
+
+    let chapter = labels.chapter + ' ' + displayed.page + ' ' + labels.of + ' ' + displayed.total;
+    let bookProgress = labels.position;
+    if (locationCount > 0) {
+      const offset = epub.locations.locationFromCfi(anchor);
+      const bookPercent = Math.round(100 * offset / Math.max(1, locationCount - 1));
+      bookProgress = labels.book + ' · ' + bookPercent + '%';
+
+      if (section) {
+        const withinSection = Math.max(0, Math.min(section.count - 1, offset - section.start));
+        const chapterPercent = Math.round(100 * withinSection / Math.max(1, section.count - 1));
+        chapter += ' · ' + chapterPercent + '%';
+
+        // Only the current section has been paginated at this font and viewport size.
+        const pagesPerLocation = displayed.total / section.count;
+        const precedingPages = Math.round(section.start * pagesPerLocation);
+        const followingPages = Math.round((locationCount - section.start - section.count) * pagesPerLocation);
+        const total = precedingPages + displayed.total + followingPages;
+        const estimate = sections.size > 1 ? labels.approximately : '';
+        bookProgress = labels.book + ' ' + estimate + (precedingPages + displayed.page)
+          + ' ' + labels.of + ' ' + estimate + total + ' · ' + bookPercent + '%';
+      }
+    }
+    output.textContent = chapter + '  |  ' + bookProgress;
+  }
+
+  rendition.on('relocated', current => {
+    if (token !== state.token || progress.resizing) return;
+    location = current;
+    progress.anchor ??= current.start.cfi;
+    book.location = progress.anchor;
+    book.progress = 'בקריאה';
+    update();
+    saveBook(book).catch(console.error);
+  });
+
+  progress.index = async () => {
+    try {
+      const locations = await epub.locations.generate(200);
+      if (token !== state.token) return;
+      locations.forEach((cfi, offset) => {
+        const index = new ePub.CFI(cfi).spinePos;
+        if (!sections.has(index)) sections.set(index, {start: offset, count: 0});
+        sections.get(index).count++;
+      });
+      locationCount = locations.length;
+    } catch (error) {
+      if (token === state.token) console.error(error);
+    }
+    if (token !== state.token) return;
+    if (!locationCount) labels = {...labels, position: '—'};
+    update();
+  };
+
+  progress.reflow = async font => {
+    if (progress.resizing || !location) return;
+    progress.resizing = true;
+    try {
+      rendition.themes.fontSize(font + '%');
+      rendition.manager.clear();
+      await rendition.display(progress.anchor || location.start.cfi);
+      if (token !== state.token) return;
+      location = rendition.currentLocation();
+      update();
+    } finally {
+      progress.resizing = false;
+    }
+  };
+  return progress;
+}
+
 async function drawPdf(){if(!state.pdf||!state.book)return;const token=state.token;const pageNumber=state.page;const page=await state.pdf.getPage(pageNumber);if(token!==state.token||pageNumber!==state.page)return;const scale=state.zoom;const viewport=page.getViewport({scale});const canvas=document.createElement('canvas');const dpr=Math.min(window.devicePixelRatio||1,2);canvas.width=Math.ceil(viewport.width*dpr);canvas.height=Math.ceil(viewport.height*dpr);canvas.style.width=viewport.width+'px';canvas.style.height=viewport.height+'px';const context=canvas.getContext('2d');await page.render({canvasContext:context,viewport,transform:dpr!==1?[dpr,0,0,dpr,0,0]:undefined}).promise;if(token!==state.token||pageNumber!==state.page)return;const target=app.querySelector('#viewport');target.replaceChildren(canvas);target.classList.add('pdf');app.querySelector('#position').textContent=pageNumber+' / '+state.pdf.numPages;state.book.location=pageNumber;state.book.progress='עמוד '+pageNumber+' מתוך '+state.pdf.numPages;await saveBook(state.book);}
-async function navigate(n){if(state.pdf){state.page=Math.max(1,Math.min(state.pdf.numPages,state.page+n));await drawPdf();}else if(state.rendition){if(n>0)await state.rendition.next();else await state.rendition.prev();}}
-async function changeSize(n){if(state.pdf){state.zoom=Math.max(.5,Math.min(3,state.zoom+n*.2));app.querySelector('#size-label').textContent=Math.round(state.zoom*100)+'%';await drawPdf();}else{state.font=Math.max(70,Math.min(200,state.font+n*10));app.querySelector('#size-label').textContent=state.font+'%';state.rendition?.themes.fontSize(state.font+'%');}}
-async function destroy(){state.token++;try{state.rendition?.destroy();}catch{}try{state.epub?.destroy();}catch{}try{await state.pdf?.destroy();}catch{}state.rendition=null;state.epub=null;state.pdf=null;state.book=null;}
+async function navigate(n){if(state.pdf){state.page=Math.max(1,Math.min(state.pdf.numPages,state.page+n));await drawPdf();}else if(state.rendition && !state.epubProgress?.resizing){state.epubProgress.anchor = null;if(n>0)await state.rendition.next();else await state.rendition.prev();}}
+async function changeSize(n){if(state.pdf){state.zoom=Math.max(.5,Math.min(3,state.zoom+n*.2));app.querySelector('#size-label').textContent=Math.round(state.zoom*100)+'%';await drawPdf();}else if (state.epubProgress && !state.epubProgress.resizing) {
+  const font = Math.max(70, Math.min(200, state.font + n * 10));
+  if (font === state.font) return;
+  state.font = font;
+  app.querySelector('#size-label').textContent = font + '%';
+  try {
+    await state.epubProgress.reflow(font);
+  } catch (error) {
+    console.error(error);
+  }
+}}
+async function destroy(){state.token++;try{state.rendition?.destroy();}catch{}try{state.epub?.destroy();}catch{}try{await state.pdf?.destroy();}catch{}state.rendition=null;state.epubProgress=null;state.epub=null;state.pdf=null;state.book=null;}
 async function closeBook(){await destroy();await refresh();}
 refresh().catch(err=>{console.error(err);app.textContent='לא ניתן לפתוח את הספרייה המקומית בדפדפן הזה.';});
