@@ -24,7 +24,8 @@ const readerLabels = {
   he: {
     back: '↩ לספרייה', toc: 'תוכן עניינים', previous: 'הקודם', next: 'הבא',
     close: 'סגור ✕', loading: 'טוען…', position: 'מחשב התקדמות…',
-    chapter: 'פרק', book: 'ספר', of: 'מתוך', approximately: 'כ־',
+    sectionPage: (page, total) => 'עמוד ' + page + ' מתוך ' + total + ' במקטע הנוכחי',
+    bookProgress: percent => 'התקדמות בספר: ' + percent + '%',
     smaller: 'הקטנת גופן', larger: 'הגדלת גופן', theme: 'שינוי ערכת צבעים',
     openError: 'לא ניתן לפתוח את הספר. ייתכן שהקובץ פגום או מוגן.',
     errorNotice: 'אירעה שגיאה בפתיחת הספר',
@@ -32,7 +33,8 @@ const readerLabels = {
   en: {
     back: '↩ Library', toc: 'Table of contents', previous: 'Previous', next: 'Next',
     close: 'Close ✕', loading: 'Loading…', position: 'Calculating progress…',
-    chapter: 'Chapter', book: 'Book', of: 'of', approximately: '≈',
+    sectionPage: (page, total) => 'Page ' + page + ' of ' + total + ' in this section',
+    bookProgress: percent => 'Book progress: ' + percent + '%',
     smaller: 'Decrease font size', larger: 'Increase font size', theme: 'Toggle color theme',
     openError: 'Could not open this book. The file may be damaged or protected.',
     errorNotice: 'An error occurred while opening the book.',
@@ -93,26 +95,18 @@ function trackEpubProgress(epub, rendition, book, labels, token) {
     const anchor = progress.anchor || cfi;
     const section = sections.get(index);
 
-    let chapter = labels.chapter + ' ' + displayed.page + ' ' + labels.of + ' ' + displayed.total;
+    let chapter = labels.sectionPage(displayed.page, displayed.total);
     let bookProgress = labels.position;
     if (locationCount > 0) {
       const offset = epub.locations.locationFromCfi(anchor);
       const bookPercent = Math.round(100 * offset / Math.max(1, locationCount - 1));
-      bookProgress = labels.book + ' · ' + bookPercent + '%';
+      bookProgress = labels.bookProgress(bookPercent);
 
       if (section) {
         const withinSection = Math.max(0, Math.min(section.count - 1, offset - section.start));
         const chapterPercent = Math.round(100 * withinSection / Math.max(1, section.count - 1));
         chapter += ' · ' + chapterPercent + '%';
 
-        // Only the current section has been paginated at this font and viewport size.
-        const pagesPerLocation = displayed.total / section.count;
-        const precedingPages = Math.round(section.start * pagesPerLocation);
-        const followingPages = Math.round((locationCount - section.start - section.count) * pagesPerLocation);
-        const total = precedingPages + displayed.total + followingPages;
-        const estimate = sections.size > 1 ? labels.approximately : '';
-        bookProgress = labels.book + ' ' + estimate + (precedingPages + displayed.page)
-          + ' ' + labels.of + ' ' + estimate + total + ' · ' + bookPercent + '%';
       }
     }
     output.textContent = chapter + '  |  ' + bookProgress;
