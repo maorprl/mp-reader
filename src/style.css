@@ -64,3 +64,41 @@
   padding-inline-start: 10px;
   border-inline-start: 3px solid #e9bd39;
 }
+
+.stage {
+  position: relative;
+}
+.highlight-confirmation {
+  position: absolute;
+  z-index: 3;
+  translate: -50% 0;
+  left: 50%;
+  bottom: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100% - 16px);
+  padding: 8px;
+  border-radius: 10px;
+  background: #163041;
+  color: white;
+  box-shadow: 0 3px 12px #0005;
+}
+.highlight-confirmation[hidden],
+.highlight-confirmation span:empty {
+  display: none;
+}
+.highlight-confirmation button {
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 1px solid #7891a0;
+  border-radius: 6px;
+  background: #f4f7f8;
+  color: #163041;
+}
+.highlight-confirmation [data-confirm] {
+  background: #ffe276;
+  border-color: #ffe276;
+}

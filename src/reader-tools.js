@@ -8,7 +8,7 @@ const translations = {
     layout: 'פריסת הקריאה', width: 'רוחב', spacing: 'ריווח שורות', margins: 'שוליים מהצדדים',
     apply: 'החל', reset: 'ברירת מחדל', highlights: 'הדגשות והערות',
     select: 'בחר טקסט בספר כדי להדגיש אותו או להוסיף הערה.', note: 'הערה',
-    save: 'שמור הדגשה', edit: 'ערוך הערה', update: 'שמור הערה', remove: 'הסר',
+    save: 'שמור הדגשה', cancel: 'בטל', edit: 'ערוך הערה', update: 'שמור הערה', remove: 'הסר',
     passage: 'עבור לקטע', location: percent => 'מיקום בספר: ' + percent + '%',
     noItems: 'אין פריטים שמורים.', error: 'הפעולה נכשלה. אפשר לנסות שוב.',
   },
@@ -19,7 +19,7 @@ const translations = {
     layout: 'Reading layout', width: 'Width', spacing: 'Line spacing', margins: 'Side margins',
     apply: 'Apply', reset: 'Reset', highlights: 'Highlights and notes',
     select: 'Select text in the book to highlight it or add a note.', note: 'Note',
-    save: 'Save highlight', edit: 'Edit note', update: 'Save note', remove: 'Remove',
+    save: 'Save highlight', cancel: 'Cancel', edit: 'Edit note', update: 'Save note', remove: 'Remove',
     passage: 'Go to passage', location: percent => 'Book position: ' + percent + '%',
     noItems: 'No saved items.', error: 'Something went wrong. Please try again.',
   },
@@ -151,7 +151,19 @@ export function attachReaderTools({root, book, rendition, language, direction, p
   root.querySelector('.reader').append(panel);
   const query = selector => panel.querySelector(selector);
   let selected;
-  let editing;
+  let draft;
+  const confirmation = document.createElement('div');
+  confirmation.className = 'highlight-confirmation';
+  confirmation.hidden = true;
+  confirmation.innerHTML = `<button type="button" data-confirm>${t.save}</button>
+    <button type="button" data-cancel>${t.cancel}</button><span role="status"></span>`;
+  stage.append(confirmation);
+
+  function clearDraft() {
+    draft = null;
+    confirmation.hidden = true;
+    confirmation.querySelector('span').textContent = '';
+  }
   let searchSequence = 0;
 
   function report(error) {
@@ -184,9 +196,58 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     navigate(moves[event.key]).catch(report);
   }
 
+  // Listen inside the rendition so the page remains available for native text selection.
+  function bindPageTaps(target, contents, options) {
+    let press;
+    let navigating = false;
+    target.addEventListener('pointerdown', event => {
+      if (!event.isPrimary || event.button !== 0) return;
+      press = {
+        id: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        start: event.timeStamp,
+        hadSelection: Boolean(draft || contents?.window.getSelection()?.toString()),
+      };
+    }, options);
+    target.addEventListener('pointercancel', () => { press = null; }, options);
+    target.addEventListener('click', async event => {
+      const start = press;
+      press = null;
+      if (!start || (event.pointerId > 0 && event.pointerId !== start.id) || event.detail !== 1 ||
+          event.timeStamp - start.start > 350 ||
+          Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10 ||
+          event.defaultPrevented || navigating || progress.resizing || signal.aborted ||
+          event.target?.closest?.('a, button, input, textarea, select, label, video, audio, [contenteditable], .reader-highlight, .highlight-confirmation')) return;
+      if (contents?.window.getSelection()?.toString()) return;
+      if (start.hadSelection || draft) {
+        clearDraft();
+        return;
+      }
+      const frame = contents?.window.frameElement;
+      const x = event.clientX + (frame?.getBoundingClientRect().left ?? 0);
+      const {left, width} = viewport.getBoundingClientRect();
+      if (!width) return;
+      const position = (x - left) / width;
+      if (position > 0.3 && position < 0.7) return;
+      const forward = (position <= 0.3) === (direction === 'rtl');
+      navigating = true;
+      try {
+        await navigate(forward ? 1 : -1);
+      } catch (error) {
+        report(error);
+      } finally {
+        navigating = false;
+      }
+    }, options);
+  }
+
+  bindPageTaps(stage, null, {signal});
+  rendition.on('relocated', clearDraft);
   window.addEventListener('keydown', handleKeys, {signal});
   rendition.on('keydown', handleKeys);
   rendition.hooks.content.register(contents => {
+    bindPageTaps(contents.document, contents);
     const spacing = book.layout.spacing;
     if (spacing) {
       contents.addStylesheetRules({
@@ -311,12 +372,12 @@ export function attachReaderTools({root, book, rendition, language, direction, p
   fillLayout();
 
   const highlightForm = query('[data-highlight-form]');
-  function openHighlightEditor(entry, existing) {
+  function openHighlightEditor(entry) {
+    clearDraft();
     selected = entry;
-    editing = existing;
     highlightForm.querySelector('blockquote').textContent = entry.text;
     highlightForm.querySelector('textarea').value = entry.note || '';
-    highlightForm.querySelector('button').textContent = existing ? t.update : t.save;
+    highlightForm.querySelector('button').textContent = t.update;
     highlightForm.hidden = false;
     query('[data-highlights]').open = true;
     showPanel(true);
@@ -355,7 +416,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
         item.append(note);
       }
       item.append(listButton(t.passage, () => jump(target)),
-        listButton(t.edit, () => openHighlightEditor(entry, true)), listButton(t.remove, async () => {
+        listButton(t.edit, () => openHighlightEditor(entry)), listButton(t.remove, async () => {
         rendition.annotations.remove(entry.cfi, 'highlight');
         highlights.splice(index, 1);
         if (selected === entry) {
@@ -368,23 +429,56 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     });
   }
   function paint(entry) {
-    rendition.annotations.highlight(entry.cfi, {}, () => openHighlightEditor(entry, true), 'reader-highlight', {
+    rendition.annotations.highlight(entry.cfi, {}, () => openHighlightEditor(entry), 'reader-highlight', {
       fill: '#ffd548', 'fill-opacity': '0.38', 'mix-blend-mode': 'normal',
     });
   }
-  rendition.on('selected', (cfi, contents) => {
-    const existing = highlights.find(entry => entry.cfi === cfi);
-    const text = contents.window.getSelection()?.toString().trim();
-    if (existing || text) openHighlightEditor(existing || {cfi, text}, Boolean(existing));
+  rendition.on('selected', (_cfi, contents) => {
+    if (signal.aborted || progress.resizing) return;
+    const selection = contents.window.getSelection();
+    const text = selection?.toString().trim();
+    if (!text || !selection.rangeCount) return;
+    // Read the live selection in case the user moved a handle before the event arrived.
+    draft = {cfi: contents.cfiFromRange(selection.getRangeAt(0)), text, contents};
+    confirmation.hidden = false;
   });
+  confirmation.querySelector('[data-cancel]').onclick = () => {
+    draft?.contents.window.getSelection()?.removeAllRanges();
+    clearDraft();
+  };
+  const confirm = confirmation.querySelector('[data-confirm]');
+  confirm.onclick = async () => {
+    if (!draft || confirm.disabled) return;
+    const {contents, ...entry} = draft;
+    if (highlights.some(highlight => highlight.cfi === entry.cfi)) {
+      contents.window.getSelection()?.removeAllRanges();
+      clearDraft();
+      return;
+    }
+    confirm.disabled = true;
+    highlights.push(entry);
+    try {
+      await persist();
+      if (signal.aborted) return;
+      paint(entry);
+      showHighlights();
+      if (draft?.cfi === entry.cfi) {
+        contents.window.getSelection()?.removeAllRanges();
+        clearDraft();
+      }
+    } catch (error) {
+      const index = highlights.indexOf(entry);
+      if (index >= 0) highlights.splice(index, 1);
+      report(error);
+      if (!signal.aborted) confirmation.querySelector('span').textContent = t.error;
+    } finally {
+      confirm.disabled = false;
+    }
+  };
   highlightForm.onsubmit = async event => {
     event.preventDefault();
     if (!selected) return;
     selected.note = highlightForm.querySelector('textarea').value.trim();
-    if (!editing) {
-      highlights.push(selected);
-      paint(selected);
-    }
     selected = null;
     highlightForm.hidden = true;
     showHighlights();
