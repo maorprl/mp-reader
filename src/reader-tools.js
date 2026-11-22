@@ -5,7 +5,7 @@ const translations = {
     tools: 'כלי קריאה', close: 'סגור', bookmarks: 'סימניות', add: 'הוסף סימנייה כאן',
     bookmark: 'סימנייה', search: 'חיפוש בספר', find: 'חפש', searching: 'מחפש…',
     noResults: 'לא נמצאו תוצאות.', limit: 'מוצגות 100 התוצאות הראשונות.',
-    layout: 'פריסת הקריאה', width: 'רוחב', spacing: 'ריווח שורות', margins: 'שוליים מהצדדים',
+    appearance: 'גופן ומצב תצוגה', layout: 'פריסת הקריאה', width: 'רוחב', spacing: 'ריווח שורות', margins: 'שוליים מהצדדים',
     apply: 'החל', reset: 'ברירת מחדל', highlights: 'הדגשות והערות',
     select: 'בחר טקסט בספר כדי להדגיש אותו או להוסיף הערה.', note: 'הערה',
     save: 'שמור הדגשה', cancel: 'בטל', edit: 'ערוך הערה', update: 'שמור הערה', remove: 'הסר',
@@ -16,7 +16,7 @@ const translations = {
     tools: 'Reading tools', close: 'Close', bookmarks: 'Bookmarks', add: 'Bookmark this location',
     bookmark: 'Bookmark', search: 'Search book', find: 'Search', searching: 'Searching…',
     noResults: 'No matches found.', limit: 'Showing the first 100 matches.',
-    layout: 'Reading layout', width: 'Width', spacing: 'Line spacing', margins: 'Side margins',
+    appearance: 'Font and theme', layout: 'Reading layout', width: 'Width', spacing: 'Line spacing', margins: 'Side margins',
     apply: 'Apply', reset: 'Reset', highlights: 'Highlights and notes',
     select: 'Select text in the book to highlight it or add a note.', note: 'Note',
     save: 'Save highlight', cancel: 'Cancel', edit: 'Edit note', update: 'Save note', remove: 'Remove',
@@ -96,6 +96,8 @@ export function attachReaderTools({root, book, rendition, language, direction, p
   const highlights = book.highlights ??= [];
   book.layout = {...defaultLayout, ...book.layout};
   const stage = root.querySelector('.stage');
+  const reader = root.querySelector('.reader');
+  const compact = window.matchMedia('(max-width: 620px)');
   const viewport = root.querySelector('#viewport');
   const toolsButton = document.createElement('button');
   toolsButton.textContent = t.tools;
@@ -122,6 +124,10 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       <summary>${t.bookmarks}</summary>
       <button type="button" data-add>${t.add}</button>
       <ul data-bookmark-list></ul>
+    </details>
+    <details class="mobile-appearance">
+      <summary>${t.appearance}</summary>
+      <div data-appearance></div>
     </details>
     <details data-layout>
       <summary>${t.layout}</summary>
@@ -150,6 +156,14 @@ export function attachReaderTools({root, book, rendition, language, direction, p
   root.querySelector('.settings').append(toolsButton);
   root.querySelector('.reader').append(panel);
   const query = selector => panel.querySelector(selector);
+  const settings = root.querySelector('.settings');
+  const appearance = settings.querySelector('.appearance-controls');
+  function arrangeAppearance() {
+    if (compact.matches) query('[data-appearance]').append(appearance);
+    else settings.prepend(appearance);
+  }
+  compact.addEventListener('change', arrangeAppearance, {signal});
+  arrangeAppearance();
   let selected;
   let draft;
   const confirmation = document.createElement('div');
@@ -229,7 +243,10 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       const {left, width} = viewport.getBoundingClientRect();
       if (!width) return;
       const position = (x - left) / width;
-      if (position > 0.3 && position < 0.7) return;
+      if (position > 0.3 && position < 0.7) {
+        if (compact.matches) reader.classList.toggle('reading-clean');
+        return;
+      }
       const forward = (position <= 0.3) === (direction === 'rtl');
       navigating = true;
       try {

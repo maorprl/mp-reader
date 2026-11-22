@@ -63,6 +63,7 @@ const readerLabels = {
     close: 'סגור ✕', loading: 'טוען…', position: 'מחשב התקדמות…',
     sectionPage: (page, total) => 'עמוד ' + page + ' מתוך ' + total + ' במקטע הנוכחי',
     bookProgress: percent => 'התקדמות בספר: ' + percent + '%',
+    progressDetails: 'פרטי התקדמות',
     smaller: 'הקטנת גופן', larger: 'הגדלת גופן', theme: 'שינוי ערכת צבעים',
     openError: 'לא ניתן לפתוח את הספר. ייתכן שהקובץ פגום או מוגן.',
     errorNotice: 'אירעה שגיאה בפתיחת הספר',
@@ -72,6 +73,7 @@ const readerLabels = {
     close: 'Close ✕', loading: 'Loading…', position: 'Calculating progress…',
     sectionPage: (page, total) => 'Page ' + page + ' of ' + total + ' in this section',
     bookProgress: percent => 'Book progress: ' + percent + '%',
+    progressDetails: 'Progress details',
     smaller: 'Decrease font size', larger: 'Increase font size', theme: 'Toggle color theme',
     openError: 'Could not open this book. The file may be damaged or protected.',
     errorNotice: 'An error occurred while opening the book.',
@@ -98,9 +100,9 @@ async function getReaderLanguage(epub) {
   return /[א-ת]/.test(epub.packaging?.metadata?.title ?? '') ? 'he' : 'en';
 }
 
-function shell(book, language = 'he'){const labels = readerLabels[language];app.innerHTML=`<div class="reader" lang="${language}" dir="${language === 'en' ? 'ltr' : 'rtl'}"><header class="reading-top"><button id="back">${labels.back}</button><strong dir="auto">${esc(book.title)}</strong><button id="toc" ${book.type==='pdf'?'hidden':''}>${labels.toc}</button></header>
+function shell(book, language = 'he'){const labels = readerLabels[language];app.innerHTML=`<div class="reader ${book.type === 'epub' ? 'reading-clean' : ''}" lang="${language}" dir="${language === 'en' ? 'ltr' : 'rtl'}"><header class="reading-top"><button id="back">${labels.back}</button><strong dir="auto">${esc(book.title)}</strong><button id="toc" ${book.type==='pdf'?'hidden':''}>${labels.toc}</button></header>
 <div class="stage ${state.night?'night':''}"><div id="viewport" class="viewport">${labels.loading}</div></div>
-<footer class="controls" ${book.type === 'epub' ? 'aria-describedby="position"' : ''}><div class="nav"><button id="prev" aria-label="${labels.previous}">${labels.previous}</button>${book.type === 'epub' ? '' : '<span id="position">—</span>'}<button id="next" aria-label="${labels.next}">${labels.next}</button></div><div class="settings"><button id="smaller" ${book.type === 'epub' ? `aria-label="${labels.smaller}"` : ''}>−</button><span id="size-label"></span><button id="larger" ${book.type === 'epub' ? `aria-label="${labels.larger}"` : ''}>＋</button><button id="theme" aria-label="${labels.theme}" ${book.type==='pdf'?'hidden':''}>◐</button></div>${book.type === 'epub' ? '<div id="position" class="epub-progress" role="status"></div>' : ''}</footer>
+<footer class="controls" ${book.type === 'epub' ? 'aria-describedby="position"' : ''}><div class="nav"><button id="prev" aria-label="${labels.previous}">${labels.previous}</button>${book.type === 'epub' ? '' : '<span id="position">—</span>'}<button id="next" aria-label="${labels.next}">${labels.next}</button></div><div class="settings"><div class="appearance-controls"><button id="smaller" ${book.type === 'epub' ? `aria-label="${labels.smaller}"` : ''}>−</button><span id="size-label"></span><button id="larger" ${book.type === 'epub' ? `aria-label="${labels.larger}"` : ''}>＋</button><button id="theme" aria-label="${labels.theme}" ${book.type==='pdf'?'hidden':''}>◐</button></div></div>${book.type === 'epub' ? `<div id="position" class="epub-progress"><button type="button" class="progress-summary" aria-label="${labels.progressDetails}" aria-expanded="false" aria-controls="progress-detail">—</button><span id="progress-detail" class="progress-detail"></span></div>` : ''}</footer>
 <aside class="toc-panel" id="toc-panel" hidden><button id="close-toc">${labels.close}</button><h3>${labels.toc}</h3><div id="toc-list"></div></aside>
 </div><div id="notice" class="notice" hidden></div>`;
 app.querySelector('#back').onclick=closeBook;
@@ -136,6 +138,13 @@ function trackEpubProgress(epub, rendition, book, labels, token) {
   const progress = {anchor: book.location, resizing: false};
   const sections = new Map();
   const output = app.querySelector('#position');
+  const summary = output.querySelector('.progress-summary');
+  const detail = output.querySelector('.progress-detail');
+  summary.onclick = () => {
+    const expanded = summary.getAttribute('aria-expanded') === 'true';
+    summary.setAttribute('aria-expanded', String(!expanded));
+    output.classList.toggle('expanded', !expanded);
+  };
   let location;
   let locationCount = 0;
 
@@ -147,10 +156,12 @@ function trackEpubProgress(epub, rendition, book, labels, token) {
 
     let chapter = labels.sectionPage(displayed.page, displayed.total);
     let bookProgress = labels.position;
+    let shortProgress = '—';
     if (locationCount > 0) {
       const offset = epub.locations.locationFromCfi(anchor);
       const bookPercent = Math.round(100 * offset / Math.max(1, locationCount - 1));
       bookProgress = labels.bookProgress(bookPercent);
+      shortProgress = bookPercent + '%';
 
       if (section) {
         const withinSection = Math.max(0, Math.min(section.count - 1, offset - section.start));
@@ -159,7 +170,9 @@ function trackEpubProgress(epub, rendition, book, labels, token) {
 
       }
     }
-    output.textContent = chapter + '  |  ' + bookProgress;
+    summary.textContent = shortProgress;
+    summary.setAttribute('aria-label', shortProgress + ' · ' + labels.progressDetails);
+    detail.textContent = chapter + '  |  ' + bookProgress;
   }
 
   rendition.on('relocated', current => {

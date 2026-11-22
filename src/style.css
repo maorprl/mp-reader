@@ -102,3 +102,74 @@
   background: #ffe276;
   border-color: #ffe276;
 }
+
+.appearance-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.progress-summary,
+.mobile-appearance {
+  display: none;
+}
+
+@media (max-width: 620px) {
+  .reader:has(.epub-progress) {
+    position: relative;
+    padding-block-end: 38px;
+  }
+  .reader:has(.epub-progress) .reading-top,
+  .reader:has(.epub-progress) .controls {
+    position: absolute;
+    inset-inline: 0;
+    z-index: 5;
+  }
+  .reader:has(.epub-progress) .reading-top {
+    top: 0;
+  }
+  .controls:has(.epub-progress) {
+    bottom: 0;
+    min-height: 38px;
+    padding: 0;
+    gap: 0;
+  }
+  .controls:has(.epub-progress) .nav,
+  .controls:has(.epub-progress) .settings {
+    padding: 6px 8px 0;
+  }
+  .reading-clean:has(.epub-progress) .reading-top,
+  .reading-clean .controls:has(.epub-progress) > :is(.nav, .settings) {
+    display: none;
+  }
+  .epub-progress .progress-summary {
+    display: inline-block;
+    min-width: 72px;
+    min-height: 37px;
+    padding: 4px 12px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+  }
+  .epub-progress .progress-detail {
+    display: none;
+  }
+  .epub-progress.expanded .progress-detail {
+    display: block;
+    padding: 0 8px 8px;
+  }
+  .reader-tools {
+    z-index: 6;
+    bottom: 38px;
+  }
+  .reading-clean .reader-tools {
+    top: 0;
+  }
+  .mobile-appearance {
+    display: block;
+  }
+  .mobile-appearance .appearance-controls button {
+    min-width: 44px;
+    width: auto;
+    text-align: center;
+  }
+}
