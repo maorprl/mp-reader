@@ -17,10 +17,46 @@ function library(){document.title='mp-reader · הספרייה';app.innerHTML=`
 <div class="grid">${state.books.map(b=>`<article class="tile"><button class="cover" data-open="${esc(b.id)}"><span class="cover-icon">${b.type==='pdf'?'PDF':'EPUB'}</span><strong>${esc(b.title)}</strong></button><div class="tile-foot"><button class="book-name" data-open="${esc(b.id)}">${esc(b.title)}</button><small>${esc(b.progress||'טרם נקרא')}</small><button class="delete" data-delete="${esc(b.id)}" aria-label="מחק ספר">🗑</button></div></article>`).join('')}</div>
 ${state.books.length?'':'<div class="empty">אין עדיין ספרים. בחר EPUB או PDF כדי להתחיל.</div>'}
 <p class="privacy">הספרים נשמרים בדפדפן ובמכשיר הנוכחי בלבד. שמור עותק של הקבצים המקוריים.</p></main><div id="notice" class="notice" hidden></div>`;
-app.querySelector('#pick').onchange=async e=>{for(const f of e.target.files){const ext=f.name.split('.').pop().toLowerCase();if(!['epub','pdf'].includes(ext))continue;try{await saveBook({id:crypto.randomUUID(),type:ext,title:f.name.replace(/\.(epub|pdf)$/i,''),file:f,addedAt:Date.now(),location:null,progress:null});}catch(err){console.error(err);message('שמירת הקובץ נכשלה. בדוק מקום פנוי.');}}await refresh();};
+app.querySelector('#pick').onchange=async event => {
+  for (const file of event.target.files) {
+    try {
+      await importBook(file);
+    } catch (error) {
+      console.error(error);
+      message('שמירת הקובץ נכשלה. בדוק מקום פנוי.');
+    }
+  }
+  await refresh();
+};
 app.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>openBook(b.dataset.open));
 app.querySelectorAll('[data-delete]').forEach(b=>b.onclick=async()=>{const book=state.books.find(x=>x.id===b.dataset.delete);if(book&&confirm('למחוק את "'+book.title+'"?')){await removeBook(book.id);await refresh();}});
 }
+async function importBook(file) {
+  const extension = file.name.split('.').pop().toLowerCase();
+  if (!['epub', 'pdf'].includes(extension)) return;
+  const id = crypto.randomUUID();
+  await saveBook({id, type: extension, title: file.name.replace(/\.(epub|pdf)$/i, ''),
+    file, addedAt: Date.now(), location: null, progress: null});
+  return id;
+}
+
+window.addEventListener('mp-reader-import', async event => {
+  if (location.hostname !== 'reader.mpreader.invalid') return;
+  const {url, name} = event.detail;
+  if (!/^\/import\/[a-f0-9-]+$/.test(url)) return;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Could not read the selected EPUB');
+    const filename = /\.epub$/i.test(name) ? name : name + '.epub';
+    const file = new File([await response.blob()], filename, {type: 'application/epub+zip', lastModified: 0});
+    const id = await importBook(file);
+    await openBook(id);
+  } catch (error) {
+    console.error(error);
+    message('לא ניתן לפתוח את קובץ ה־EPUB.');
+  }
+});
+
 const readerLabels = {
   he: {
     back: '↩ לספרייה', toc: 'תוכן עניינים', previous: 'הקודם', next: 'הבא',
