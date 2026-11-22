@@ -12,3 +12,55 @@
   white-space: pre-wrap;
   font-size: 0.875rem;
 }
+
+.stage:has(+ .controls .epub-progress) {
+  padding-inline: min(var(--reading-margins, 18px), 15vw);
+}
+.stage:has(+ .controls .epub-progress) .viewport {
+  width: min(100%, var(--reading-width, 900px));
+}
+.reader-tools {
+  inset-inline-start: 0;
+  inset-inline-end: auto;
+  top: 64px;
+  bottom: 100px;
+  width: min(390px, 100%);
+}
+.reader-tools details {
+  border-top: 1px solid #d7d9d6;
+  padding-block: 12px;
+}
+.reader-tools summary {
+  cursor: pointer;
+  font-weight: bold;
+}
+.reader-tools ul {
+  list-style: none;
+  margin-block: 8px;
+  padding-inline-start: 0;
+}
+.reader-tools li {
+  border-bottom: 1px solid #e7e4dc;
+  padding-block: 4px;
+  overflow-wrap: anywhere;
+}
+.reader-tools input,
+.reader-tools select,
+.reader-tools textarea {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  margin: 5px 0 10px;
+  border: 1px solid #bac7cc;
+  border-radius: 6px;
+  font: inherit;
+}
+.reader-tools button {
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+.reader-tools blockquote {
+  margin-inline: 0;
+  padding-inline-start: 10px;
+  border-inline-start: 3px solid #e9bd39;
+}

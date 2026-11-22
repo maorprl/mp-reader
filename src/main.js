@@ -2,6 +2,7 @@ import ePub from 'epubjs';
 import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import {allBooks,getBook,saveBook,removeBook} from './db.js';
+import {attachReaderTools, defaultLayout, setReaderLayout} from './reader-tools.js';
 import './style.css';
 pdfjs.GlobalWorkerOptions.workerSrc=workerUrl;
 const app=document.querySelector('#app');
@@ -77,8 +78,18 @@ const language = await getReaderLanguage(state.epub);
 if (state.token !== token) return;
 labels = readerLabels[language];
 shell(book, language);
-const view=app.querySelector('#viewport');view.replaceChildren();state.rendition=state.epub.renderTo(view,{width:'100%',height:'100%',flow:'paginated',spread:'none'});state.rendition.themes.register('paper',{body:{background:'#fffdf7 !important',color:'#302c28 !important'}});state.rendition.themes.register('night',{body:{background:'#20252b !important',color:'#f0eeee !important'}});state.rendition.themes.select(state.night?'night':'paper');state.rendition.themes.fontSize(state.font+'%');const progress = trackEpubProgress(state.epub, state.rendition, book, labels, token);
+const view = app.querySelector('#viewport');
+view.replaceChildren();
+const direction = state.epub.packaging?.metadata?.direction === 'rtl' ||
+  (!state.epub.packaging?.metadata?.direction && language === 'he') ? 'rtl' : 'ltr';
+setReaderLayout(app.querySelector('.stage'), {...defaultLayout, ...book.layout});
+state.rendition = state.epub.renderTo(view, {width:'100%', height:'100%', flow:'paginated',
+  spread:'none', defaultDirection:direction});state.rendition.themes.register('paper',{body:{background:'#fffdf7 !important',color:'#302c28 !important'}});state.rendition.themes.register('night',{body:{background:'#20252b !important',color:'#f0eeee !important'}});state.rendition.themes.select(state.night?'night':'paper');state.rendition.themes.fontSize(state.font+'%');const progress = trackEpubProgress(state.epub, state.rendition, book, labels, token);
 state.epubProgress = progress;
+state.readerTools = new AbortController();
+attachReaderTools({root: app, book, rendition: state.rendition, language,
+  direction: state.epub.packaging?.metadata?.direction || direction, progress, navigate,
+  persist: () => saveBook(book), signal: state.readerTools.signal});
 await state.rendition.display(book.location || undefined);
 progress.index();
 if(state.token!==token)return;const navigation=await state.epub.loaded.navigation;if(state.token!==token)return;const toc=app.querySelector('#toc-list');toc.replaceChildren();for(const item of navigation.toc||[]){const b=document.createElement('button');b.textContent=item.label;b.dir='auto';b.style.textAlign='start';b.onclick=async()=>{if (state.epubProgress.resizing) return;app.querySelector('#toc-panel').hidden=true;state.epubProgress.anchor = null;await state.rendition.display(item.href);};toc.append(b);}}}catch(err){if(state.token!==token)return;console.error(err);app.querySelector('#viewport').textContent=labels.openError;message(labels.errorNotice);}}
@@ -140,13 +151,15 @@ function trackEpubProgress(epub, rendition, book, labels, token) {
     update();
   };
 
-  progress.reflow = async font => {
+  progress.reflow = async (font, viewport) => {
     if (progress.resizing || !location) return;
     progress.resizing = true;
     try {
-      rendition.themes.fontSize(font + '%');
-      rendition.manager.clear();
-      await rendition.display(progress.anchor || location.start.cfi);
+      const anchor = progress.anchor || location.start.cfi;
+      if (font !== null) rendition.themes.fontSize(font + '%');
+      if (viewport) rendition.resize(viewport.clientWidth, viewport.clientHeight, anchor);
+      rendition.clear();
+      await rendition.display(anchor);
       if (token !== state.token) return;
       location = rendition.currentLocation();
       update();
@@ -170,6 +183,6 @@ async function changeSize(n){if(state.pdf){state.zoom=Math.max(.5,Math.min(3,sta
     console.error(error);
   }
 }}
-async function destroy(){state.token++;try{state.rendition?.destroy();}catch{}try{state.epub?.destroy();}catch{}try{await state.pdf?.destroy();}catch{}state.rendition=null;state.epubProgress=null;state.epub=null;state.pdf=null;state.book=null;}
+async function destroy(){state.token++;state.readerTools?.abort();state.readerTools=null;try{state.rendition?.destroy();}catch{}try{state.epub?.destroy();}catch{}try{await state.pdf?.destroy();}catch{}state.rendition=null;state.epubProgress=null;state.epub=null;state.pdf=null;state.book=null;}
 async function closeBook(){await destroy();await refresh();}
 refresh().catch(err=>{console.error(err);app.textContent='לא ניתן לפתוח את הספרייה המקומית בדפדפן הזה.';});
