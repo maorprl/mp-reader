@@ -90,8 +90,11 @@ state.readerTools = new AbortController();
 attachReaderTools({root: app, book, rendition: state.rendition, language,
   direction: state.epub.packaging?.metadata?.direction || direction, progress, navigate,
   persist: () => saveBook(book), signal: state.readerTools.signal});
-await state.rendition.display(book.location || undefined);
-progress.index();
+const displayed = state.rendition.display(book.location || undefined);
+progress.indexed = displayed.then(() => {
+  if (state.token === token) return progress.index();
+}, () => {});
+await displayed;
 if(state.token!==token)return;const navigation=await state.epub.loaded.navigation;if(state.token!==token)return;const toc=app.querySelector('#toc-list');toc.replaceChildren();for(const item of navigation.toc||[]){const b=document.createElement('button');b.textContent=item.label;b.dir='auto';b.style.textAlign='start';b.onclick=async()=>{if (state.epubProgress.resizing) return;app.querySelector('#toc-panel').hidden=true;state.epubProgress.anchor = null;await state.rendition.display(item.href);};toc.append(b);}}}catch(err){if(state.token!==token)return;console.error(err);app.querySelector('#viewport').textContent=labels.openError;message(labels.errorNotice);}}
 function trackEpubProgress(epub, rendition, book, labels, token) {
   const progress = {anchor: book.location, resizing: false};

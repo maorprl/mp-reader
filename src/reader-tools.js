@@ -9,6 +9,7 @@ const translations = {
     apply: 'החל', reset: 'ברירת מחדל', highlights: 'הדגשות והערות',
     select: 'בחר טקסט בספר כדי להדגיש אותו או להוסיף הערה.', note: 'הערה',
     save: 'שמור הדגשה', edit: 'ערוך הערה', update: 'שמור הערה', remove: 'הסר',
+    passage: 'עבור לקטע', location: percent => 'מיקום בספר: ' + percent + '%',
     noItems: 'אין פריטים שמורים.', error: 'הפעולה נכשלה. אפשר לנסות שוב.',
   },
   en: {
@@ -19,6 +20,7 @@ const translations = {
     apply: 'Apply', reset: 'Reset', highlights: 'Highlights and notes',
     select: 'Select text in the book to highlight it or add a note.', note: 'Note',
     save: 'Save highlight', edit: 'Edit note', update: 'Save note', remove: 'Remove',
+    passage: 'Go to passage', location: percent => 'Book position: ' + percent + '%',
     noItems: 'No saved items.', error: 'Something went wrong. Please try again.',
   },
 };
@@ -30,8 +32,66 @@ export function setReaderLayout(stage, layout) {
   stage.style.setProperty('--reading-margins', layout.margins + 'px');
 }
 
+function chapterLookup(epub, signal) {
+  const entriesBySection = epub.loaded.navigation.then(navigation => {
+    const sections = new Map();
+    function collect(entries) {
+      for (const {href, label, subitems} of entries) {
+        const section = epub.spine.get(href);
+        if (section && label?.trim()) {
+          if (!sections.has(section.index)) sections.set(section.index, []);
+          sections.get(section.index).push({label: label.trim(), fragment: href.split('#')[1]});
+        }
+        collect(subitems ?? []);
+      }
+    }
+    if (!signal.aborted) collect(navigation.toc ?? []);
+    return sections;
+  });
+  const anchorsBySection = new Map();
+  const compare = new ePub.CFI().compare;
+
+  async function anchorsFor(section, entries) {
+    let document;
+    if (entries.some(entry => entry.fragment)) {
+      // Use a separate parsed document so this lookup does not affect rendering or indexing.
+      document = await epub.load(section.url);
+    }
+    const anchors = [];
+    for (const entry of entries) {
+      if (!entry.fragment) {
+        anchors.push({...entry, cfi: null});
+        continue;
+      }
+      let id = entry.fragment;
+      try { id = decodeURIComponent(id); } catch {}
+      const element = document.getElementById(id);
+      if (element) anchors.push({...entry, cfi: section.cfiFromElement(element)});
+    }
+    return anchors.sort((a, b) => a.cfi && b.cfi ? compare(a.cfi, b.cfi) : Number(Boolean(a.cfi)) - Number(Boolean(b.cfi)));
+  }
+
+  return async cfi => {
+    const entries = await entriesBySection;
+    if (signal.aborted) return;
+    const {spinePos} = new ePub.CFI(cfi);
+    const indices = [...entries.keys()].filter(index => index <= spinePos).sort((a, b) => b - a);
+    for (const index of indices) {
+      if (!anchorsBySection.has(index)) {
+        const section = epub.spine.get(index);
+        anchorsBySection.set(index, anchorsFor(section, entries.get(index)).catch(() => []));
+      }
+      const anchors = await anchorsBySection.get(index);
+      if (signal.aborted) return;
+      const match = anchors.findLast(anchor => index < spinePos || !anchor.cfi || compare(anchor.cfi, cfi) <= 0);
+      if (match) return match.label;
+    }
+  };
+}
+
 export function attachReaderTools({root, book, rendition, language, direction, progress, navigate, persist, signal}) {
   const t = translations[language];
+  const chapterAt = chapterLookup(rendition.book, signal);
   const bookmarks = book.bookmarks ??= [];
   const highlights = book.highlights ??= [];
   book.layout = {...defaultLayout, ...book.layout};
@@ -264,14 +324,38 @@ export function attachReaderTools({root, book, rendition, language, direction, p
 
   function showHighlights() {
     showList(query('[data-highlight-list]'), highlights, (item, entry, index) => {
-      item.append(listButton(entry.text, () => jump(entry.cfi)));
+      const chapter = document.createElement('strong');
+      chapter.dir = 'auto';
+      chapter.hidden = true;
+      const quote = document.createElement('blockquote');
+      quote.dir = 'auto';
+      quote.textContent = entry.text;
+      item.append(chapter, quote);
+
+      const start = new ePub.CFI(entry.cfi);
+      start.collapse(true);
+      const target = start.toString();
+      chapterAt(target).then(async title => {
+        if (signal.aborted || !chapter.isConnected) return;
+        if (!title) {
+          await progress.indexed;
+          if (signal.aborted || !chapter.isConnected) return;
+          const percent = rendition.book.locations.percentageFromCfi(target);
+          if (percent != null) title = t.location(Math.round(percent * 100));
+        }
+        if (title) {
+          chapter.textContent = title;
+          chapter.hidden = false;
+        }
+      }).catch(report);
       if (entry.note) {
         const note = document.createElement('p');
         note.dir = 'auto';
         note.textContent = entry.note;
         item.append(note);
       }
-      item.append(listButton(t.edit, () => openHighlightEditor(entry, true)), listButton(t.remove, async () => {
+      item.append(listButton(t.passage, () => jump(target)),
+        listButton(t.edit, () => openHighlightEditor(entry, true)), listButton(t.remove, async () => {
         rendition.annotations.remove(entry.cfi, 'highlight');
         highlights.splice(index, 1);
         if (selected === entry) {
