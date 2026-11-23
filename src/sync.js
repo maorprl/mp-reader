@@ -84,7 +84,9 @@ export function showPairingScreen(root, onConnectionChange) {
   root.innerHTML = `<main class="library pairing-screen">
     <h1>mp-reader</h1>
     <h2>חיבור לספרייה</h2>
-    <form><label>קוד צימוד <input name="code" dir="ltr" autocomplete="off" required></label>
+    <button type="button" data-request>הצג קוד צימוד</button>
+    <output dir="ltr" data-code aria-live="polite"></output>
+    <form><label>קוד צימוד ישן <input name="code" dir="ltr" autocomplete="off" required></label>
       <button>חבר מכשיר</button></form>
     <button type="button" data-create>צור ספרייה חדשה</button>
     <p role="status"></p>
@@ -92,8 +94,53 @@ export function showPairingScreen(root, onConnectionChange) {
   const form = root.querySelector('form');
   const status = root.querySelector('[role=status]');
   const buttons = root.querySelectorAll('button');
+  const requestButton = root.querySelector('[data-request]');
+  const output = root.querySelector('[data-code]');
+  let requestAttempt = 0;
+  requestButton.onclick = async () => {
+    const attempt = ++requestAttempt;
+    const proof = crypto.randomUUID().replaceAll('-', '');
+    output.textContent = '';
+    requestButton.disabled = true;
+    try {
+      const {code} = await call('/device-request', {proof});
+      if (!output.isConnected || attempt !== requestAttempt) return;
+      output.textContent = code;
+      status.textContent = 'במכשיר שכבר מחובר, בחר סנכרון מכשירים והזן שם את הקוד.';
+      requestButton.disabled = false;
+      const deadline = Date.now() + 300000;
+      while (Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        if (!output.isConnected || attempt !== requestAttempt || isPaired()) return;
+        let result;
+        try { result = await call('/device-status', {proof}); }
+        catch (error) {
+          if (error.message.includes('(404)')) break;
+          continue;
+        }
+        if (!output.isConnected || attempt !== requestAttempt || isPaired()) return;
+        if (result.approved) {
+          localStorage.setItem(scopeKey, crypto.randomUUID());
+          localStorage.setItem(tokenKey, proof);
+          await onConnectionChange();
+          return;
+        }
+      }
+      if (attempt === requestAttempt) {
+        output.textContent = '';
+        status.textContent = 'תוקף הקוד פג. אפשר להציג קוד חדש.';
+      }
+    } catch (error) {
+      console.error(error);
+      if (attempt === requestAttempt) status.textContent = 'לא ניתן להציג קוד כרגע.';
+    } finally {
+      if (attempt === requestAttempt && !isPaired()) requestButton.disabled = false;
+    }
+  };
   async function connect(path, payload) {
     if (buttons[0].disabled || isPaired()) return;
+    ++requestAttempt;
+    output.textContent = '';
     buttons.forEach(button => { button.disabled = true; });
     status.textContent = 'מתחבר…';
     try {
@@ -121,7 +168,10 @@ export function setupSync(button, onConnectionChange) {
     const panel = document.createElement('dialog');
     panel.dir = 'rtl';
     panel.innerHTML = `<h2>סנכרון מכשירים</h2>
-      <button type="button" data-pair>צור קוד למכשיר נוסף</button>
+      <form data-approve><label>הוסף מכשיר לפי הקוד שמופיע עליו
+        <input name="code" dir="ltr" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required>
+      </label><button>אשר צימוד</button></form>
+      <button type="button" data-pair>צור קוד ארוך למכשיר ישן</button>
       <button type="button" data-disconnect>נתק מכשיר</button>
       <output dir="ltr" style="overflow-wrap:anywhere"></output>
       <p role="status"></p>
@@ -130,6 +180,21 @@ export function setupSync(button, onConnectionChange) {
     const status = panel.querySelector('[role=status]');
     const pair = panel.querySelector('[data-pair]');
     const disconnect = panel.querySelector('[data-disconnect]');
+    const approval = panel.querySelector('[data-approve]');
+    approval.onsubmit = async event => {
+      event.preventDefault();
+      const submit = approval.querySelector('button');
+      submit.disabled = disconnect.disabled = true;
+      try {
+        await call('/device-approve', {code:approval.elements.code.value});
+        approval.reset();
+        status.textContent = 'המכשיר אושר. הספרייה תיפתח בו בעוד כמה שניות.';
+      } catch {
+        status.textContent = 'הקוד לא נמצא או פג. בדוק את הקוד במכשיר שמצטרף.';
+      } finally {
+        submit.disabled = disconnect.disabled = false;
+      }
+    };
     pair.onclick = async () => {
       pair.disabled = disconnect.disabled = true;
       try {

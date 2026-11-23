@@ -200,3 +200,10 @@
   background: #173c52;
   color: white;
 }
+
+.pairing-screen [data-code]:empty { display: none; }
+.pairing-screen [data-code] {
+  text-align: center;
+  font: bold 2.25rem monospace;
+  letter-spacing: .18em;
+}

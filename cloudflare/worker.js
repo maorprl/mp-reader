@@ -56,6 +56,41 @@ async function initialize(db) {
   ]);
 }
 
+async function devicePairing(request, db, path, reply, library) {
+  await db.prepare('CREATE TABLE IF NOT EXISTS sync_requests (code TEXT PRIMARY KEY, proof TEXT UNIQUE NOT NULL, expires INTEGER NOT NULL, library TEXT)').run();
+  const {proof, code} = await request.json();
+  const now = Date.now();
+  if (path === '/device-approve') {
+    if (typeof code !== 'string' || !/^\d{6}$/.test(code)) return reply({error: 'code'}, 400);
+    const result = await db.prepare('UPDATE sync_requests SET library=? WHERE code=? AND expires>? AND library IS NULL')
+      .bind(library, code, now).run();
+    return result.meta.changes ? reply({ok:true}) : reply({error:'unavailable'},404);
+  }
+  if (typeof proof !== 'string' || !secretPattern.test(proof)) return reply({error: 'proof'},400);
+  const hash = await digest(proof);
+  if (path === '/device-request') {
+    await db.prepare('DELETE FROM sync_requests WHERE expires<=?').bind(now).run();
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const number = crypto.getRandomValues(new Uint32Array(1))[0] % 1000000;
+      const candidate = String(number).padStart(6, '0');
+      const inserted = await db.prepare('INSERT OR IGNORE INTO sync_requests VALUES (?,?,?,NULL)')
+        .bind(candidate,hash,now+300000).run();
+      if (inserted.meta.changes) return reply({code:candidate},201);
+      const existing = await db.prepare('SELECT code FROM sync_requests WHERE proof=?').bind(hash).first();
+      if (existing) return reply(existing);
+    }
+    return reply({error:'busy'},503);
+  }
+  const [device] = await db.batch([
+    db.prepare('INSERT OR IGNORE INTO sync_devices SELECT proof,library FROM sync_requests WHERE proof=? AND expires>? AND library IS NOT NULL')
+      .bind(hash,now),
+    db.prepare('DELETE FROM sync_requests WHERE proof=? AND EXISTS (SELECT 1 FROM sync_devices WHERE token=?)').bind(hash,hash),
+  ]);
+  if (device.meta.changes || await db.prepare('SELECT 1 FROM sync_devices WHERE token=?').bind(hash).first()) return reply({approved:true});
+  const pending = await db.prepare('SELECT 1 FROM sync_requests WHERE proof=? AND expires>?').bind(hash,now).first();
+  return pending ? reply({approved:false}) : reply({error:'expired'},404);
+}
+
 export default {
   async fetch(request, env) {
     const origin = request.headers.get('Origin');
@@ -73,11 +108,14 @@ export default {
     try {
       if (request.method === 'GET' && path === '/') {
         const result = await env.DB.prepare('SELECT 1 AS ok').first();
-        return reply({databaseConnected: result.ok === 1, syncVersion: 2});
+        return reply({databaseConnected: result.ok === 1, syncVersion: 3});
       }
       if (request.method !== 'POST') return reply({error: 'method'}, 405);
 
       const db = env.DB;
+      if (path === '/device-request' || path === '/device-status') {
+        return await devicePairing(request, db, path, reply);
+      }
       if (path === '/create') {
         await initialize(db);
         const token = secret();
@@ -103,6 +141,7 @@ export default {
       const device = await db.prepare('SELECT library FROM sync_devices WHERE token = ?').bind(await digest(token)).first();
       if (!device) return reply({error: 'auth'}, 401);
       const {library} = device;
+      if (path === '/device-approve') return await devicePairing(request, db, path, reply, library);
       if (path === '/pair') {
         const code = secret();
         await db.batch([
