@@ -91,6 +91,10 @@ async function devicePairing(request, db, path, reply, library) {
   return pending ? reply({approved:false}) : reply({error:'expired'},404);
 }
 
+function ensureRecoveryTable(db) {
+  return db.prepare('CREATE TABLE IF NOT EXISTS sync_recovery (library TEXT PRIMARY KEY, code TEXT UNIQUE NOT NULL)').run();
+}
+
 export default {
   async fetch(request, env) {
     const origin = request.headers.get('Origin');
@@ -108,13 +112,23 @@ export default {
     try {
       if (request.method === 'GET' && path === '/') {
         const result = await env.DB.prepare('SELECT 1 AS ok').first();
-        return reply({databaseConnected: result.ok === 1, syncVersion: 3});
+        return reply({databaseConnected: result.ok === 1, syncVersion: 4});
       }
       if (request.method !== 'POST') return reply({error: 'method'}, 405);
 
       const db = env.DB;
       if (path === '/device-request' || path === '/device-status') {
         return await devicePairing(request, db, path, reply);
+      }
+      if (path === '/recover') {
+        const {code} = await request.json();
+        if (typeof code !== 'string' || !secretPattern.test(code)) return reply({error:'code'},400);
+        await ensureRecoveryTable(db);
+        const entry = await db.prepare('SELECT library FROM sync_recovery WHERE code=?').bind(await digest(code)).first();
+        if (!entry) return reply({error:'invalid recovery code'},404);
+        const token = secret();
+        await db.prepare('INSERT INTO sync_devices VALUES (?,?)').bind(await digest(token),entry.library).run();
+        return reply({token},201);
       }
       if (path === '/create') {
         await initialize(db);
@@ -141,6 +155,17 @@ export default {
       const device = await db.prepare('SELECT library FROM sync_devices WHERE token = ?').bind(await digest(token)).first();
       if (!device) return reply({error: 'auth'}, 401);
       const {library} = device;
+      if (path === '/recovery-code') {
+        await ensureRecoveryTable(db);
+        const {code} = await request.json();
+        if (typeof code !== 'string' || !secretPattern.test(code)) return reply({error:'code'},400);
+        const hash = await digest(code);
+        const result = await db.prepare('INSERT OR IGNORE INTO sync_recovery VALUES (?,?)').bind(library,hash).run();
+        if (result.meta.changes) return reply({ok:true});
+        const existing = await db.prepare('SELECT code FROM sync_recovery WHERE library=?').bind(library).first();
+        return existing?.code === hash ? reply({ok:true}) : reply({error:'already set'},409);
+      }
+
       if (path === '/device-approve') return await devicePairing(request, db, path, reply, library);
       if (path === '/pair') {
         const code = secret();

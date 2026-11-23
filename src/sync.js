@@ -87,6 +87,10 @@ export function showPairingScreen(root, onConnectionChange) {
     <div data-choices>
       <button type="button" data-request>הצטרף לספרייה קיימת</button>
       <button type="button" data-create>צור ספרייה חדשה</button>
+      <details><summary>שחזר ספרייה באמצעות קוד שחזור</summary>
+        <form data-recover><label>קוד שחזור <input name="code" dir="ltr" autocomplete="off" required></label>
+          <button>שחזר ספרייה</button></form>
+      </details>
     </div>
     <output dir="ltr" data-code aria-live="polite"></output>
     <p role="status"></p>
@@ -151,25 +155,30 @@ export function showPairingScreen(root, onConnectionChange) {
       }
     }
   };
-  async function createLibrary() {
+  async function connect(path, payload) {
     if (buttons[0].disabled || isPaired()) return;
     ++requestAttempt;
     output.textContent = '';
     buttons.forEach(button => { button.disabled = true; });
     status.textContent = 'מתחבר…';
     try {
-      const {token} = await call('/create');
+      const {token} = await call(path, payload);
       localStorage.setItem(scopeKey, crypto.randomUUID());
       localStorage.setItem(tokenKey, token);
       await onConnectionChange();
     } catch (error) {
       console.error(error);
-      status.textContent = 'יצירת הספרייה נכשלה. בדוק את החיבור לאינטרנט.';
+      status.textContent = path === '/recover' ? 'השחזור נכשל. בדוק את הקוד ואת החיבור לאינטרנט.' : 'יצירת הספרייה נכשלה. בדוק את החיבור לאינטרנט.';
     } finally {
       buttons.forEach(button => { button.disabled = false; });
     }
   }
-  root.querySelector('[data-create]').onclick = createLibrary;
+  root.querySelector('[data-create]').onclick = () => connect('/create');
+  const recover = root.querySelector('[data-recover]');
+  recover.onsubmit = event => {
+    event.preventDefault();
+    connect('/recover', {code: recover.elements.code.value.trim().replaceAll('-', '').toLowerCase()});
+  };
 }
 
 export function setupSync(button, onConnectionChange) {
@@ -181,6 +190,8 @@ export function setupSync(button, onConnectionChange) {
       <form data-approve><label>הוסף מכשיר לפי הקוד שמופיע עליו
         <input name="code" dir="ltr" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required>
       </label><button>אשר צימוד</button></form>
+      <button type="button" data-recovery>הפק קוד שחזור</button>
+      <output data-recovery-code dir="ltr" style="display:block;overflow-wrap:anywhere"></output>
       <button type="button" data-disconnect>נתק מכשיר</button>
       <p role="status"></p>
       <button type="button" data-close>סגור</button>`;
@@ -202,8 +213,28 @@ export function setupSync(button, onConnectionChange) {
         submit.disabled = disconnect.disabled = false;
       }
     };
+    const recovery = panel.querySelector('[data-recovery]');
+    const recoveryOutput = panel.querySelector('[data-recovery-code]');
+    const recoveryKey = 'mp-reader-recovery:' + localStorage.getItem(tokenKey);
+    recovery.onclick = async () => {
+      const code = localStorage.getItem(recoveryKey) || crypto.randomUUID().replaceAll('-', '');
+      localStorage.setItem(recoveryKey, code);
+      recovery.disabled = disconnect.disabled = true;
+      try {
+        await call('/recovery-code', {code});
+        recoveryOutput.textContent = code.match(/.{8}/g).join('-');
+        status.textContent = 'שמור את קוד השחזור במקום בטוח מחוץ לאפליקציה. הוא מאפשר גישה לספרייה.';
+      } catch (error) {
+        status.textContent = error.message.includes('(409)')
+          ? 'כבר הופק קוד שחזור לספרייה. השתמש בעותק ששמרת או פתח את המכשיר שהפיק אותו.'
+          : 'לא ניתן להפיק קוד כרגע. בדוק את החיבור לאינטרנט.';
+      } finally {
+        recovery.disabled = disconnect.disabled = false;
+      }
+    };
     disconnect.onclick = () => {
       if (!window.confirm('לנתק את המכשיר? לחיבור מחדש לספרייה הזו צריך קוד ממכשיר מצומד אחר.')) return;
+      localStorage.removeItem(recoveryKey);
       localStorage.removeItem(tokenKey);
       localStorage.removeItem(scopeKey);
       panel.close();
