@@ -3,6 +3,7 @@ import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import {allBooks,getBook,saveBook,removeBook} from './db.js';
 import {attachReaderTools, defaultLayout, setReaderLayout} from './reader-tools.js';
+import {setupSync, syncBook} from './sync.js';
 import './style.css';
 pdfjs.GlobalWorkerOptions.workerSrc=workerUrl;
 const app=document.querySelector('#app');
@@ -11,12 +12,13 @@ const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 function message(t){const m=document.querySelector('#notice');if(m){m.textContent=t;m.hidden=false;setTimeout(()=>{if(m.textContent===t)m.hidden=true},4000);}else alert(t);}
 async function refresh(){state.books=(await allBooks()).sort((a,b)=>b.addedAt-a.addedAt);library();}
 function library(){document.title='mp-reader · הספרייה';app.innerHTML=`
-<header class="top"><div class="brand">📖 mp-reader</div><span>הספרייה האישית</span></header>
+<header class="top"><div class="brand">📖 mp-reader</div><button id="sync-devices" type="button">סנכרון מכשירים</button></header>
 <main class="library"><div class="hero"><div class="eyebrow">קורא ספרים אישי</div><h1>הספרייה שלי</h1><p>קוראים EPUB ו־PDF, ללא חשבון וללא העלאת הקבצים לענן.</p></div>
 <div class="actions"><h2>הספרים שלי <small>(${state.books.length})</small></h2><label class="primary">＋ הוספת ספרים<input id="pick" type="file" accept=".epub,.pdf" multiple hidden></label></div>
 <div class="grid">${state.books.map(b=>`<article class="tile"><button class="cover" data-open="${esc(b.id)}"><span class="cover-icon">${b.type==='pdf'?'PDF':'EPUB'}</span><strong>${esc(b.title)}</strong></button><div class="tile-foot"><button class="book-name" data-open="${esc(b.id)}">${esc(b.title)}</button><small>${esc(b.progress||'טרם נקרא')}</small><button class="delete" data-delete="${esc(b.id)}" aria-label="מחק ספר">🗑</button></div></article>`).join('')}</div>
 ${state.books.length?'':'<div class="empty">אין עדיין ספרים. בחר EPUB או PDF כדי להתחיל.</div>'}
 <p class="privacy">הספרים נשמרים בדפדפן ובמכשיר הנוכחי בלבד. שמור עותק של הקבצים המקוריים.</p></main><div id="notice" class="notice" hidden></div>`;
+setupSync(app.querySelector('#sync-devices'));
 app.querySelector('#pick').onchange=async event => {
   for (const file of event.target.files) {
     try {
@@ -111,7 +113,7 @@ app.querySelector('#smaller').onclick=()=>changeSize(-1);app.querySelector('#lar
 app.querySelector('#size-label').textContent=book.type==='pdf'?Math.round(state.zoom*100)+'%':state.font+'%';
 if(book.type==='epub'){app.querySelector('#theme').onclick=()=>{state.night=!state.night;app.querySelector('.stage').classList.toggle('night',state.night);state.rendition?.themes.select(state.night?'night':'paper');};app.querySelector('#toc').onclick=()=>app.querySelector('#toc-panel').hidden=false;app.querySelector('#close-toc').onclick=()=>app.querySelector('#toc-panel').hidden=true;}
 }
-async function openBook(id){await destroy();const book=await getBook(id);if(!book)return;state.book=book;const token=++state.token;let labels=readerLabels.he;shell(book);try{if(book.type==='pdf'){const buffer=await book.file.arrayBuffer();state.pdf=await pdfjs.getDocument({data:new Uint8Array(buffer)}).promise;if(state.token!==token)return;state.page=Math.max(1,Math.min(state.pdf.numPages,Number(book.location)||1));await drawPdf();}else{const data=await book.file.arrayBuffer();state.epub=ePub(data);await state.epub.ready;if(state.token!==token)return;
+async function openBook(id){await destroy();const book=await getBook(id);if(!book)return;state.book=book;const token=++state.token;let labels=readerLabels.he;shell(book);try{await syncBook(book, saveBook).catch(console.error);if(state.token!==token)return;if(book.type==='pdf'){const buffer=await book.file.arrayBuffer();state.pdf=await pdfjs.getDocument({data:new Uint8Array(buffer)}).promise;if(state.token!==token)return;state.page=Math.max(1,Math.min(state.pdf.numPages,Number(book.location)||1));await drawPdf();}else{const data=await book.file.arrayBuffer();state.epub=ePub(data);await state.epub.ready;if(state.token!==token)return;
 const language = await getReaderLanguage(state.epub);
 if (state.token !== token) return;
 labels = readerLabels[language];
@@ -127,13 +129,18 @@ state.epubProgress = progress;
 state.readerTools = new AbortController();
 attachReaderTools({root: app, book, rendition: state.rendition, language,
   direction: state.epub.packaging?.metadata?.direction || direction, progress, navigate,
-  persist: () => saveBook(book), signal: state.readerTools.signal});
+  persist: () => saveReadingState(book), signal: state.readerTools.signal});
 const displayed = state.rendition.display(book.location || undefined);
 progress.indexed = displayed.then(() => {
   if (state.token === token) return progress.index();
 }, () => {});
 await displayed;
 if(state.token!==token)return;const navigation=await state.epub.loaded.navigation;if(state.token!==token)return;const toc=app.querySelector('#toc-list');toc.replaceChildren();for(const item of navigation.toc||[]){const b=document.createElement('button');b.textContent=item.label;b.dir='auto';b.style.textAlign='start';b.onclick=async()=>{if (state.epubProgress.resizing) return;app.querySelector('#toc-panel').hidden=true;state.epubProgress.anchor = null;await state.rendition.display(item.href);};toc.append(b);}}}catch(err){if(state.token!==token)return;console.error(err);app.querySelector('#viewport').textContent=labels.openError;message(labels.errorNotice);}}
+async function saveReadingState(book) {
+  await saveBook(book);
+  syncBook(book).catch(console.error);
+}
+
 function trackEpubProgress(epub, rendition, book, labels, token) {
   const progress = {anchor: book.location, resizing: false};
   const sections = new Map();
@@ -182,7 +189,7 @@ function trackEpubProgress(epub, rendition, book, labels, token) {
     book.location = progress.anchor;
     book.progress = 'בקריאה';
     update();
-    saveBook(book).catch(console.error);
+    saveReadingState(book).catch(console.error);
   });
 
   progress.index = async () => {

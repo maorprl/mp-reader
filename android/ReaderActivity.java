@@ -50,6 +50,9 @@ public final class ReaderActivity extends Activity {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 Uri url = request.getUrl();
+                if ("https".equals(url.getScheme()) &&
+                        "lucky-unit-12e9.maorperlov.workers.dev".equals(url.getHost()) &&
+                        !request.isForMainFrame()) return null;
                 if (!"https".equals(url.getScheme()) || !HOST.equals(url.getHost()) ||
                         url.getPort() != -1 || !"GET".equals(request.getMethod())) {
                     return missing();
