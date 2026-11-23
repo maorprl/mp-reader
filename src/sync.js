@@ -70,6 +70,11 @@ export async function syncBook(book, persist) {
 }
 
 export function setupSync(button) {
+  function showConnection() {
+    const paired = Boolean(localStorage.getItem(tokenKey));
+    button.textContent = paired ? 'המכשיר מצומד · סנכרון מכשירים' : 'סנכרון מכשירים';
+  }
+  showConnection();
   button.onclick = () => {
     const panel = document.createElement('dialog');
     panel.dir = 'rtl';
@@ -99,6 +104,7 @@ export function setupSync(button) {
         status.textContent = 'מתחבר…';
         const result = await call(path, payload);
         if (result.token) localStorage.setItem(tokenKey, result.token);
+        showConnection();
         render();
         if (result.code) {
           output.textContent = result.code;
