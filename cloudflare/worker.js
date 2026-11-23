@@ -95,6 +95,28 @@ function ensureRecoveryTable(db) {
   return db.prepare('CREATE TABLE IF NOT EXISTS sync_recovery (library TEXT PRIMARY KEY, code TEXT UNIQUE NOT NULL)').run();
 }
 
+function sameDigest(left, right) {
+  let mismatch = 0;
+  for (let index = 0; index < left.length; index++) {
+    mismatch |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+  return mismatch === 0;
+}
+
+async function configuredLibrary(db, selected) {
+  await db.prepare('CREATE TABLE IF NOT EXISTS sync_catalog (library TEXT, book TEXT, title TEXT, size INTEGER, PRIMARY KEY(library,book))').run();
+  const libraries = 'SELECT library FROM sync_devices UNION SELECT library FROM sync_fields UNION SELECT library FROM sync_catalog UNION SELECT library FROM sync_recovery';
+  if (selected) {
+    return db.prepare('SELECT library FROM (' + libraries + ') WHERE library=?').bind(selected).first();
+  }
+  const {results} = await db.prepare(
+    'SELECT library FROM (' + libraries + ') WHERE library IN (SELECT library FROM sync_catalog UNION SELECT library FROM sync_fields) LIMIT 2'
+  ).all();
+  if (results.length) return results.length === 1 ? results[0] : null;
+  const empty = await db.prepare(libraries + ' LIMIT 2').all();
+  return empty.results.length === 1 ? empty.results[0] : null;
+}
+
 export default {
   async fetch(request, env) {
     const origin = request.headers.get('Origin');
@@ -112,7 +134,7 @@ export default {
     try {
       if (request.method === 'GET' && path === '/') {
         const result = await env.DB.prepare('SELECT 1 AS ok').first();
-        return reply({databaseConnected: result.ok === 1, syncVersion: 4});
+        return reply({databaseConnected: result.ok === 1, syncVersion: 5});
       }
       if (request.method !== 'POST') return reply({error: 'method'}, 405);
 
@@ -122,9 +144,18 @@ export default {
       }
       if (path === '/recover') {
         const {code} = await request.json();
-        if (typeof code !== 'string' || !secretPattern.test(code)) return reply({error:'code'},400);
+        if (typeof code !== 'string' || !code || code.length > 256) return reply({error:'code'},400);
+        await initialize(db);
         await ensureRecoveryTable(db);
-        const entry = await db.prepare('SELECT library FROM sync_recovery WHERE code=?').bind(await digest(code)).first();
+        const hash = await digest(code);
+        let entry;
+        const configured = env.LIBRARY_PASSWORD?.trim().replaceAll('-', '').toLowerCase();
+        if (configured && sameDigest(hash, await digest(configured))) {
+          entry = await configuredLibrary(db, env.LIBRARY_ID);
+          if (!entry) return reply({error:'library selection required'},409);
+        } else if (secretPattern.test(code)) {
+          entry = await db.prepare('SELECT library FROM sync_recovery WHERE code=?').bind(hash).first();
+        }
         if (!entry) return reply({error:'invalid recovery code'},404);
         const token = secret();
         await db.prepare('INSERT INTO sync_devices VALUES (?,?)').bind(await digest(token),entry.library).run();
