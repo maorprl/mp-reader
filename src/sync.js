@@ -3,8 +3,7 @@ const tokenKey = 'mp-reader-sync-token';
 const fields = ['location', 'bookmarks', 'highlights'];
 const pending = new Map();
 
-async function call(path, payload) {
-  const token = localStorage.getItem(tokenKey);
+async function call(path, payload, token = localStorage.getItem(tokenKey)) {
   const response = await fetch(endpoint + path, {
     method: 'POST',
     headers: {'Content-Type': 'application/json', ...(token ? {Authorization: 'Bearer ' + token} : {})},
@@ -29,6 +28,7 @@ export async function syncBook(book, persist) {
   const key = 'mp-reader-sync:' + token + ':' + hash;
   const earlier = pending.get(key) ?? Promise.resolve();
   const next = earlier.catch(() => {}).then(async () => {
+    if (localStorage.getItem(tokenKey) !== token) return;
     const baseline = JSON.parse(localStorage.getItem(key) || '{}');
     const snapshot = Object.fromEntries(fields.map(field => [field, book[field] ?? (field === 'location' ? null : [])]));
     const changes = {};
@@ -39,7 +39,7 @@ export async function syncBook(book, persist) {
         changes[field] = {value, base: baseline[field]?.rev ?? 0};
       }
     }
-    const {fields: remote} = await call('/book', {book: hash, changes});
+    const {fields: remote} = await call('/book', {book: hash, changes}, token);
     if (localStorage.getItem(tokenKey) !== token) return;
     let changed = false;
     for (const field of fields) {
@@ -69,7 +69,7 @@ export async function syncBook(book, persist) {
   }
 }
 
-export function setupSync(button, onConnect) {
+export function setupSync(button, onConnectionChange) {
   function showConnection() {
     const paired = Boolean(localStorage.getItem(tokenKey));
     button.textContent = paired ? 'המכשיר מצומד · סנכרון מכשירים' : 'סנכרון מכשירים';
@@ -81,6 +81,7 @@ export function setupSync(button, onConnect) {
     panel.innerHTML = `<h2>סנכרון מכשירים</h2>
       <button type="button" data-action="create">הפעל סנכרון</button>
       <button type="button" data-action="pair">צור קוד למכשיר נוסף</button>
+      <button type="button" data-action="disconnect">נתק מכשיר</button>
       <form><label>קוד צימוד <input name="code" dir="ltr" autocomplete="off" required></label>
         <button>חבר מכשיר</button></form>
       <output dir="ltr" style="overflow-wrap:anywhere"></output>
@@ -92,20 +93,26 @@ export function setupSync(button, onConnect) {
     const create = panel.querySelector('[data-action=create]');
     const pair = panel.querySelector('[data-action=pair]');
     const form = panel.querySelector('form');
+    const disconnect = panel.querySelector('[data-action=disconnect]');
     function render() {
       const active = Boolean(localStorage.getItem(tokenKey));
       create.hidden = active;
       form.hidden = active;
       pair.hidden = !active;
+      disconnect.hidden = !active;
       status.textContent = active ? 'המכשיר מחובר לסנכרון.' : '';
     }
+    let busy = false;
     async function run(path, payload) {
+      if (busy) return;
+      busy = true;
+      disconnect.disabled = true;
       try {
         status.textContent = 'מתחבר…';
         const result = await call(path, payload);
         if (result.token) {
           localStorage.setItem(tokenKey, result.token);
-          onConnect();
+          onConnectionChange().catch(console.error);
         }
         showConnection();
         render();
@@ -115,8 +122,25 @@ export function setupSync(button, onConnect) {
         }
       } catch {
         status.textContent = 'לא ניתן להתחבר. בדוק את החיבור לאינטרנט ואת קוד הצימוד.';
+      } finally {
+        busy = false;
+        disconnect.disabled = false;
       }
     }
+    disconnect.onclick = () => {
+      if (!window.confirm('לנתק את המכשיר מהסנכרון? הספרים וההערות המקומיים יישארו. לחיבור מחדש לספרייה הזו צריך קוד ממכשיר מצומד אחר.')) return;
+      const token = localStorage.getItem(tokenKey);
+      localStorage.removeItem(tokenKey);
+      const prefix = 'mp-reader-sync:' + token + ':';
+      for (const key of Object.keys(localStorage)) {
+        if (key.startsWith(prefix)) localStorage.removeItem(key);
+      }
+      showConnection();
+      output.textContent = '';
+      render();
+      status.textContent = 'המכשיר נותק מהסנכרון.';
+      onConnectionChange().catch(console.error);
+    };
     create.onclick = () => run('/create');
     pair.onclick = () => run('/pair');
     form.onsubmit = event => {
@@ -143,14 +167,17 @@ export function readCatalog() {
 
 export async function uploadBook(book) {
   if (book.file.size > maxBookSize) throw new Error('book-size');
+  const token = localStorage.getItem(tokenKey);
   const hash = await identify(book);
   for (let start = 0; start < book.file.size; start += chunkSize) {
     const bytes = new Uint8Array(await book.file.slice(start, start + chunkSize).arrayBuffer());
     let binary = '';
     for (const byte of bytes) binary += String.fromCharCode(byte);
-    await call('/upload', {book: hash, index: start / chunkSize, data: btoa(binary)});
+    if (token !== localStorage.getItem(tokenKey)) throw new Error('Device disconnected');
+    await call('/upload', {book: hash, index: start / chunkSize, data: btoa(binary)}, token);
   }
-  await call('/publish', {book: hash, size: book.file.size, title: book.title.slice(0, 300)});
+  if (token !== localStorage.getItem(tokenKey)) throw new Error('Device disconnected');
+  await call('/publish', {book: hash, size: book.file.size, title: book.title.slice(0, 300)}, token);
 }
 
 export async function downloadBook(entry) {
