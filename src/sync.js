@@ -1,5 +1,15 @@
 const endpoint = 'https://lucky-unit-12e9.maorperlov.workers.dev';
 const tokenKey = 'mp-reader-sync-token';
+const scopeKey = 'mp-reader-local-library';
+const initialToken = localStorage.getItem(tokenKey);
+if (initialToken && !localStorage.getItem(scopeKey)) {
+  localStorage.setItem(scopeKey, 'legacy');
+}
+
+export function localLibrary() {
+  return isPaired() ? localStorage.getItem(scopeKey) : null;
+}
+
 const fields = ['location', 'bookmarks', 'highlights'];
 const pending = new Map();
 
@@ -22,6 +32,7 @@ async function identify(book) {
 }
 
 export async function syncBook(book, persist) {
+  if (book.localLibrary && book.localLibrary !== localLibrary()) return;
   const token = localStorage.getItem(tokenKey);
   if (!token || book.type !== 'epub') return;
   const hash = await identify(book);
@@ -87,6 +98,7 @@ export function showPairingScreen(root, onConnectionChange) {
     status.textContent = 'מתחבר…';
     try {
       const {token} = await call(path, payload);
+      localStorage.setItem(scopeKey, crypto.randomUUID());
       localStorage.setItem(tokenKey, token);
       await onConnectionChange();
     } catch (error) {
@@ -133,6 +145,7 @@ export function setupSync(button, onConnectionChange) {
     disconnect.onclick = () => {
       if (!window.confirm('לנתק את המכשיר? לחיבור מחדש לספרייה הזו צריך קוד ממכשיר מצומד אחר.')) return;
       localStorage.removeItem(tokenKey);
+      localStorage.removeItem(scopeKey);
       panel.close();
       onConnectionChange().catch(console.error);
     };
@@ -154,6 +167,7 @@ export function readCatalog() {
 }
 
 export async function uploadBook(book) {
+  if (!book || book.localLibrary !== localLibrary()) throw new Error('Library changed');
   if (book.file.size > maxBookSize) throw new Error('book-size');
   const token = localStorage.getItem(tokenKey);
   const hash = await identify(book);

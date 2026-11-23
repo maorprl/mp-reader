@@ -3,7 +3,7 @@ import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import {allBooks,getBook,saveBook,removeBook} from './db.js';
 import {attachReaderTools, defaultLayout, setReaderLayout} from './reader-tools.js';
-import {setupSync, showPairingScreen, syncBook, isPaired, readCatalog, uploadBook, downloadBook, identify} from './sync.js';
+import {setupSync, showPairingScreen, syncBook, isPaired, readCatalog, uploadBook, downloadBook, identify, localLibrary} from './sync.js';
 import './style.css';
 pdfjs.GlobalWorkerOptions.workerSrc=workerUrl;
 const app=document.querySelector('#app');
@@ -43,9 +43,11 @@ async function refresh() {
 async function openLibraryBook(button) {
   const entry = state.books.find(book => book.id === button.dataset.open);
   if (!entry?.remote) return openBook(button.dataset.open);
+  const scope = localLibrary();
   button.disabled = true;
   try {
     const book = await downloadBook(entry);
+    if (scope !== localLibrary()) return;
     await saveBook(book);
     await openBook(book.id);
   } catch (error) {
