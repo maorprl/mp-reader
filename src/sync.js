@@ -69,87 +69,75 @@ export async function syncBook(book, persist) {
   }
 }
 
-export function setupSync(button, onConnectionChange) {
-  function showConnection() {
-    const paired = Boolean(localStorage.getItem(tokenKey));
-    button.textContent = paired ? 'המכשיר מצומד · סנכרון מכשירים' : 'סנכרון מכשירים';
+export function showPairingScreen(root, onConnectionChange) {
+  root.innerHTML = `<main class="library pairing-screen">
+    <h1>mp-reader</h1>
+    <h2>חיבור לספרייה</h2>
+    <form><label>קוד צימוד <input name="code" dir="ltr" autocomplete="off" required></label>
+      <button>חבר מכשיר</button></form>
+    <button type="button" data-create>צור ספרייה חדשה</button>
+    <p role="status"></p>
+  </main>`;
+  const form = root.querySelector('form');
+  const status = root.querySelector('[role=status]');
+  const buttons = root.querySelectorAll('button');
+  async function connect(path, payload) {
+    if (buttons[0].disabled || isPaired()) return;
+    buttons.forEach(button => { button.disabled = true; });
+    status.textContent = 'מתחבר…';
+    try {
+      const {token} = await call(path, payload);
+      localStorage.setItem(tokenKey, token);
+      await onConnectionChange();
+    } catch (error) {
+      console.error(error);
+      status.textContent = 'החיבור לא הושלם. בדוק את האינטרנט ואת קוד הצימוד.';
+    } finally {
+      buttons.forEach(button => { button.disabled = false; });
+    }
   }
-  showConnection();
+  form.onsubmit = event => {
+    event.preventDefault();
+    connect('/join', {code: form.elements.code.value.trim().toLowerCase()});
+  };
+  root.querySelector('[data-create]').onclick = () => connect('/create');
+}
+
+export function setupSync(button, onConnectionChange) {
+  button.textContent = 'המכשיר מצומד · סנכרון מכשירים';
   button.onclick = () => {
     const panel = document.createElement('dialog');
     panel.dir = 'rtl';
     panel.innerHTML = `<h2>סנכרון מכשירים</h2>
-      <button type="button" data-action="create">הפעל סנכרון</button>
-      <button type="button" data-action="pair">צור קוד למכשיר נוסף</button>
-      <button type="button" data-action="disconnect">נתק מכשיר</button>
-      <form><label>קוד צימוד <input name="code" dir="ltr" autocomplete="off" required></label>
-        <button>חבר מכשיר</button></form>
+      <button type="button" data-pair>צור קוד למכשיר נוסף</button>
+      <button type="button" data-disconnect>נתק מכשיר</button>
       <output dir="ltr" style="overflow-wrap:anywhere"></output>
       <p role="status"></p>
       <button type="button" data-close>סגור</button>`;
     document.body.append(panel);
     const status = panel.querySelector('[role=status]');
-    const output = panel.querySelector('output');
-    const create = panel.querySelector('[data-action=create]');
-    const pair = panel.querySelector('[data-action=pair]');
-    const form = panel.querySelector('form');
-    const disconnect = panel.querySelector('[data-action=disconnect]');
-    function render() {
-      const active = Boolean(localStorage.getItem(tokenKey));
-      create.hidden = active;
-      form.hidden = active;
-      pair.hidden = !active;
-      disconnect.hidden = !active;
-      status.textContent = active ? 'המכשיר מחובר לסנכרון.' : '';
-    }
-    let busy = false;
-    async function run(path, payload) {
-      if (busy) return;
-      busy = true;
-      disconnect.disabled = true;
+    const pair = panel.querySelector('[data-pair]');
+    const disconnect = panel.querySelector('[data-disconnect]');
+    pair.onclick = async () => {
+      pair.disabled = disconnect.disabled = true;
       try {
-        status.textContent = 'מתחבר…';
-        const result = await call(path, payload);
-        if (result.token) {
-          localStorage.setItem(tokenKey, result.token);
-          onConnectionChange().catch(console.error);
-        }
-        showConnection();
-        render();
-        if (result.code) {
-          output.textContent = result.code;
-          status.textContent = 'העתק את הקוד למכשיר השני. הקוד תקף לעשר דקות ולשימוש אחד.';
-        }
+        const {code} = await call('/pair');
+        panel.querySelector('output').textContent = code;
+        status.textContent = 'הקוד תקף לעשר דקות ולשימוש אחד.';
       } catch {
-        status.textContent = 'לא ניתן להתחבר. בדוק את החיבור לאינטרנט ואת קוד הצימוד.';
+        status.textContent = 'לא ניתן ליצור קוד. בדוק את החיבור לאינטרנט.';
       } finally {
-        busy = false;
-        disconnect.disabled = false;
+        pair.disabled = disconnect.disabled = false;
       }
-    }
-    disconnect.onclick = () => {
-      if (!window.confirm('לנתק את המכשיר מהסנכרון? הספרים וההערות המקומיים יישארו. לחיבור מחדש לספרייה הזו צריך קוד ממכשיר מצומד אחר.')) return;
-      const token = localStorage.getItem(tokenKey);
-      localStorage.removeItem(tokenKey);
-      const prefix = 'mp-reader-sync:' + token + ':';
-      for (const key of Object.keys(localStorage)) {
-        if (key.startsWith(prefix)) localStorage.removeItem(key);
-      }
-      showConnection();
-      output.textContent = '';
-      render();
-      status.textContent = 'המכשיר נותק מהסנכרון.';
-      onConnectionChange().catch(console.error);
     };
-    create.onclick = () => run('/create');
-    pair.onclick = () => run('/pair');
-    form.onsubmit = event => {
-      event.preventDefault();
-      run('/join', {code: form.elements.code.value.trim().toLowerCase()});
+    disconnect.onclick = () => {
+      if (!window.confirm('לנתק את המכשיר? לחיבור מחדש לספרייה הזו צריך קוד ממכשיר מצומד אחר.')) return;
+      localStorage.removeItem(tokenKey);
+      panel.close();
+      onConnectionChange().catch(console.error);
     };
     panel.querySelector('[data-close]').onclick = () => panel.close();
     panel.addEventListener('close', () => panel.remove(), {once: true});
-    render();
     panel.showModal();
   };
 }

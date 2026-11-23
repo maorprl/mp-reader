@@ -173,3 +173,30 @@
     text-align: center;
   }
 }
+
+.pairing-screen {
+  max-width: 440px;
+  display: grid;
+  gap: 12px;
+}
+.pairing-screen h1,
+.pairing-screen h2 {
+  margin: 0;
+}
+.pairing-screen form,
+.pairing-screen label {
+  display: grid;
+  gap: 8px;
+}
+.pairing-screen input,
+.pairing-screen button {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid #bac7cc;
+  border-radius: 8px;
+  font: inherit;
+}
+.pairing-screen form button {
+  background: #173c52;
+  color: white;
+}

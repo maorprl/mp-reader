@@ -3,7 +3,7 @@ import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import {allBooks,getBook,saveBook,removeBook} from './db.js';
 import {attachReaderTools, defaultLayout, setReaderLayout} from './reader-tools.js';
-import {setupSync, syncBook, isPaired, readCatalog, uploadBook, downloadBook, identify} from './sync.js';
+import {setupSync, showPairingScreen, syncBook, isPaired, readCatalog, uploadBook, downloadBook, identify} from './sync.js';
 import './style.css';
 pdfjs.GlobalWorkerOptions.workerSrc=workerUrl;
 const app=document.querySelector('#app');
@@ -13,8 +13,13 @@ function message(t){const m=document.querySelector('#notice');if(m){m.textConten
 let libraryRequest = 0;
 async function refresh() {
   const request = ++libraryRequest;
+  if (!isPaired()) {
+    state.books = [];
+    showPairingScreen(app, refresh);
+    return;
+  }
   const books = (await allBooks()).sort((a,b)=>b.addedAt-a.addedAt);
-  if (request !== libraryRequest || state.book) return;
+  if (request !== libraryRequest || state.book || !isPaired()) return;
   state.books = books;
   library();
   if (!isPaired()) return;
@@ -24,7 +29,7 @@ async function refresh() {
     for (const book of books) {
       if (book.type === 'epub') known.add(await identify(book));
     }
-    if (request !== libraryRequest || state.book) return;
+    if (request !== libraryRequest || state.book || !isPaired()) return;
     state.books = books.concat(remote.filter(entry => !known.has(entry.book)).map(entry => ({
       ...entry, id: entry.book, type: 'epub', progress: 'זמין להורדה', remote: true,
     })));
@@ -111,6 +116,7 @@ app.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>openLibraryBook(b))
 app.querySelectorAll('[data-delete]').forEach(b=>b.onclick=async()=>{const book=state.books.find(x=>x.id===b.dataset.delete);if(book&&confirm('למחוק את "'+book.title+'"?')){await removeBook(book.id);await refresh();}});
 }
 async function importBook(file) {
+  if (!isPaired()) return;
   const extension = file.name.split('.').pop().toLowerCase();
   if (!['epub', 'pdf'].includes(extension)) return;
   const id = crypto.randomUUID();
@@ -121,6 +127,7 @@ async function importBook(file) {
 
 window.addEventListener('mp-reader-import', async event => {
   if (location.hostname !== 'reader.mpreader.invalid') return;
+  if (!isPaired()) return;
   const {url, name} = event.detail;
   if (!/^\/import\/[a-f0-9-]+$/.test(url)) return;
   try {
@@ -190,7 +197,7 @@ app.querySelector('#smaller').onclick=()=>changeSize(-1);app.querySelector('#lar
 app.querySelector('#size-label').textContent=book.type==='pdf'?Math.round(state.zoom*100)+'%':state.font+'%';
 if(book.type==='epub'){app.querySelector('#theme').onclick=()=>{state.night=!state.night;app.querySelector('.stage').classList.toggle('night',state.night);state.rendition?.themes.select(state.night?'night':'paper');};app.querySelector('#toc').onclick=()=>app.querySelector('#toc-panel').hidden=false;app.querySelector('#close-toc').onclick=()=>app.querySelector('#toc-panel').hidden=true;}
 }
-async function openBook(id){await destroy();const book=await getBook(id);if(!book)return;state.book=book;const token=++state.token;let labels=readerLabels.he;shell(book);try{await syncBook(book, saveBook).catch(console.error);if(state.token!==token)return;if(book.type==='pdf'){const buffer=await book.file.arrayBuffer();state.pdf=await pdfjs.getDocument({data:new Uint8Array(buffer)}).promise;if(state.token!==token)return;state.page=Math.max(1,Math.min(state.pdf.numPages,Number(book.location)||1));await drawPdf();}else{const data=await book.file.arrayBuffer();state.epub=ePub(data);await state.epub.ready;if(state.token!==token)return;
+async function openBook(id){if (!isPaired()) return;await destroy();const book=await getBook(id);if(!book)return;state.book=book;const token=++state.token;let labels=readerLabels.he;shell(book);try{await syncBook(book, saveBook).catch(console.error);if(state.token!==token)return;if(book.type==='pdf'){const buffer=await book.file.arrayBuffer();state.pdf=await pdfjs.getDocument({data:new Uint8Array(buffer)}).promise;if(state.token!==token)return;state.page=Math.max(1,Math.min(state.pdf.numPages,Number(book.location)||1));await drawPdf();}else{const data=await book.file.arrayBuffer();state.epub=ePub(data);await state.epub.ready;if(state.token!==token)return;
 const language = await getReaderLanguage(state.epub);
 if (state.token !== token) return;
 labels = readerLabels[language];
