@@ -3,34 +3,111 @@ import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import {allBooks,getBook,saveBook,removeBook} from './db.js';
 import {attachReaderTools, defaultLayout, setReaderLayout} from './reader-tools.js';
-import {setupSync, syncBook} from './sync.js';
+import {setupSync, syncBook, isPaired, readCatalog, uploadBook, downloadBook, identify} from './sync.js';
 import './style.css';
 pdfjs.GlobalWorkerOptions.workerSrc=workerUrl;
 const app=document.querySelector('#app');
 const state={books:[],book:null,epub:null,rendition:null,pdf:null,page:1,zoom:1.2,font:105,night:false,token:0};
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function message(t){const m=document.querySelector('#notice');if(m){m.textContent=t;m.hidden=false;setTimeout(()=>{if(m.textContent===t)m.hidden=true},4000);}else alert(t);}
-async function refresh(){state.books=(await allBooks()).sort((a,b)=>b.addedAt-a.addedAt);library();}
+let libraryRequest = 0;
+async function refresh() {
+  const request = ++libraryRequest;
+  const books = (await allBooks()).sort((a,b)=>b.addedAt-a.addedAt);
+  if (request !== libraryRequest || state.book) return;
+  state.books = books;
+  library();
+  if (!isPaired()) return;
+  try {
+    const {books: remote} = await readCatalog();
+    const known = new Set();
+    for (const book of books) {
+      if (book.type === 'epub') known.add(await identify(book));
+    }
+    if (request !== libraryRequest || state.book) return;
+    state.books = books.concat(remote.filter(entry => !known.has(entry.book)).map(entry => ({
+      ...entry, id: entry.book, type: 'epub', progress: 'זמין להורדה', remote: true,
+    })));
+    library();
+  } catch (error) {
+    console.error(error);
+    if (request === libraryRequest && !state.book) message('ספריית הענן לא זמינה כרגע.');
+  }
+}
+
+async function openLibraryBook(button) {
+  const entry = state.books.find(book => book.id === button.dataset.open);
+  if (!entry?.remote) return openBook(button.dataset.open);
+  button.disabled = true;
+  try {
+    const book = await downloadBook(entry);
+    await saveBook(book);
+    await openBook(book.id);
+  } catch (error) {
+    console.error(error);
+    message('הורדת הספר נכשלה.');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function shareLibrary(button) {
+  button.disabled = true;
+  try {
+    const {books: remote} = await readCatalog();
+    const existing = new Set(remote.map(entry => entry.book));
+    let skipped = 0;
+    for (const book of await allBooks()) {
+      if (book.type !== 'epub') continue;
+      const hash = await identify(book);
+      if (!existing.has(hash)) {
+        if (book.file.size > 25 * 1024 * 1024) {
+          skipped++;
+          continue;
+        }
+        await uploadBook(book);
+        existing.add(hash);
+      }
+      await syncBook(book, saveBook);
+    }
+    await refresh();
+    message(skipped ? 'הספרייה סונכרנה. ספרים מעל 25 MB נשארו במכשיר.' : 'הספרייה סונכרנה.');
+  } catch (error) {
+    console.error(error);
+    message('סנכרון הספרייה נכשל. אפשר לנסות שוב.');
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function library(){document.title='mp-reader · הספרייה';app.innerHTML=`
 <header class="top"><div class="brand">📖 mp-reader</div><button id="sync-devices" type="button">סנכרון מכשירים</button></header>
-<main class="library"><div class="hero"><div class="eyebrow">קורא ספרים אישי</div><h1>הספרייה שלי</h1><p>קוראים EPUB ו־PDF, ללא חשבון וללא העלאת הקבצים לענן.</p></div>
-<div class="actions"><h2>הספרים שלי <small>(${state.books.length})</small></h2><label class="primary">＋ הוספת ספרים<input id="pick" type="file" accept=".epub,.pdf" multiple hidden></label></div>
-<div class="grid">${state.books.map(b=>`<article class="tile"><button class="cover" data-open="${esc(b.id)}"><span class="cover-icon">${b.type==='pdf'?'PDF':'EPUB'}</span><strong>${esc(b.title)}</strong></button><div class="tile-foot"><button class="book-name" data-open="${esc(b.id)}">${esc(b.title)}</button><small>${esc(b.progress||'טרם נקרא')}</small><button class="delete" data-delete="${esc(b.id)}" aria-label="מחק ספר">🗑</button></div></article>`).join('')}</div>
+<main class="library"><div class="hero"><div class="eyebrow">קורא ספרים אישי</div><h1>הספרייה שלי</h1><p>קוראים EPUB ו־PDF. ספרי EPUB יכולים להסתנכרן בין מכשירים מצומדים.</p></div>
+<div class="actions">${isPaired() ? '<button type="button" id="share-library">סנכרן ספרים</button>' : ''}<h2>הספרים שלי <small>(${state.books.length})</small></h2><label class="primary">＋ הוספת ספרים<input id="pick" type="file" accept=".epub,.pdf" multiple hidden></label></div>
+<div class="grid">${state.books.map(b=>`<article class="tile"><button class="cover" data-open="${esc(b.id)}"><span class="cover-icon">${b.type==='pdf'?'PDF':'EPUB'}</span><strong>${esc(b.title)}</strong></button><div class="tile-foot"><button class="book-name" data-open="${esc(b.id)}">${esc(b.title)}</button><small>${esc(b.progress||'טרם נקרא')}</small>${b.remote ? '' : `<button class="delete" data-delete="${esc(b.id)}" aria-label="מחק עותק מקומי">🗑</button>`}</div></article>`).join('')}</div>
 ${state.books.length?'':'<div class="empty">אין עדיין ספרים. בחר EPUB או PDF כדי להתחיל.</div>'}
-<p class="privacy">הספרים נשמרים בדפדפן ובמכשיר הנוכחי בלבד. שמור עותק של הקבצים המקוריים.</p></main><div id="notice" class="notice" hidden></div>`;
-setupSync(app.querySelector('#sync-devices'));
+<p class="privacy">ספרי EPUB מסונכרנים נשמרים בענן ובמכשירים שהורידו אותם.</p></main><div id="notice" class="notice" hidden></div>`;
+setupSync(app.querySelector('#sync-devices'), refresh);
+const share = app.querySelector('#share-library');
+if (share) share.onclick = () => shareLibrary(share);
 app.querySelector('#pick').onchange=async event => {
+  let uploadFailed = false;
   for (const file of event.target.files) {
     try {
-      await importBook(file);
+      const id = await importBook(file);
+      if (id && isPaired() && /\.epub$/i.test(file.name)) {
+        try { await uploadBook(await getBook(id)); }
+        catch (error) { console.error(error); uploadFailed = true; }
+      }
     } catch (error) {
       console.error(error);
       message('שמירת הקובץ נכשלה. בדוק מקום פנוי.');
     }
   }
   await refresh();
+  if (uploadFailed) message('הספר נשמר במכשיר. ההעלאה לענן לא הושלמה.');
 };
-app.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>openBook(b.dataset.open));
+app.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>openLibraryBook(b));
 app.querySelectorAll('[data-delete]').forEach(b=>b.onclick=async()=>{const book=state.books.find(x=>x.id===b.dataset.delete);if(book&&confirm('למחוק את "'+book.title+'"?')){await removeBook(book.id);await refresh();}});
 }
 async function importBook(file) {
@@ -245,3 +322,7 @@ async function changeSize(n){if(state.pdf){state.zoom=Math.max(.5,Math.min(3,sta
 async function destroy(){state.token++;state.readerTools?.abort();state.readerTools=null;try{state.rendition?.destroy();}catch{}try{state.epub?.destroy();}catch{}try{await state.pdf?.destroy();}catch{}state.rendition=null;state.epubProgress=null;state.epub=null;state.pdf=null;state.book=null;}
 async function closeBook(){await destroy();await refresh();}
 refresh().catch(err=>{console.error(err);app.textContent='לא ניתן לפתוח את הספרייה המקומית בדפדפן הזה.';});
+
+window.addEventListener('focus', () => {
+  if (isPaired() && !state.book && !document.querySelector('dialog[open]')) refresh().catch(console.error);
+});

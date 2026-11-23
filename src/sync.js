@@ -69,7 +69,7 @@ export async function syncBook(book, persist) {
   }
 }
 
-export function setupSync(button) {
+export function setupSync(button, onConnect) {
   function showConnection() {
     const paired = Boolean(localStorage.getItem(tokenKey));
     button.textContent = paired ? 'המכשיר מצומד · סנכרון מכשירים' : 'סנכרון מכשירים';
@@ -103,7 +103,10 @@ export function setupSync(button) {
       try {
         status.textContent = 'מתחבר…';
         const result = await call(path, payload);
-        if (result.token) localStorage.setItem(tokenKey, result.token);
+        if (result.token) {
+          localStorage.setItem(tokenKey, result.token);
+          onConnect();
+        }
         showConnection();
         render();
         if (result.code) {
@@ -126,3 +129,42 @@ export function setupSync(button) {
     panel.showModal();
   };
 }
+
+const chunkSize = 384000;
+const maxBookSize = 25 * 1024 * 1024;
+
+export function isPaired() {
+  return Boolean(localStorage.getItem(tokenKey));
+}
+
+export function readCatalog() {
+  return call('/catalog');
+}
+
+export async function uploadBook(book) {
+  if (book.file.size > maxBookSize) throw new Error('book-size');
+  const hash = await identify(book);
+  for (let start = 0; start < book.file.size; start += chunkSize) {
+    const bytes = new Uint8Array(await book.file.slice(start, start + chunkSize).arrayBuffer());
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    await call('/upload', {book: hash, index: start / chunkSize, data: btoa(binary)});
+  }
+  await call('/publish', {book: hash, size: book.file.size, title: book.title.slice(0, 300)});
+}
+
+export async function downloadBook(entry) {
+  const chunks = [];
+  for (let start = 0; start < entry.size; start += chunkSize) {
+    const {data} = await call('/download', {book: entry.book, index: start / chunkSize});
+    chunks.push(Uint8Array.from(atob(data), value => value.charCodeAt(0)));
+  }
+  const file = new File(chunks, entry.title + '.epub', {type:'application/epub+zip'});
+  const book = {id:crypto.randomUUID(), type:'epub', title:entry.title, file, addedAt:Date.now()};
+  if (file.size !== entry.size || await identify(book) !== entry.book) {
+    throw new Error('EPUB verification failed');
+  }
+  return book;
+}
+
+export {identify};

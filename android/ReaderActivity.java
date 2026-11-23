@@ -1,4 +1,4 @@
-package app.mpreader.reader;
+package app.mpreader.sync;
 
 import android.app.Activity;
 import android.content.ClipData;

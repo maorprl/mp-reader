@@ -17,7 +17,7 @@ cp -R dist/. "$work/assets/web/"
 "$tools/aapt2" compile --dir android/res -o "$work/resources.zip"
 "$tools/aapt2" link -I "$platform" --manifest android/AndroidManifest.xml \
   -A "$work/assets" --java "$work/generated" -o "$work/base.apk" "$work/resources.zip"
-sources=(android/ReaderActivity.java "$work/generated/app/mpreader/reader/R.java")
+sources=(android/ReaderActivity.java "$work/generated/app/mpreader/sync/R.java")
 if [ -n "${MP_READER_ECJ_JAR:-}" ]; then
   java -jar "$MP_READER_ECJ_JAR" -8 -proc:none -bootclasspath "$platform:$tools/core-lambda-stubs.jar" -d "$work/classes" "${sources[@]}"
 else
