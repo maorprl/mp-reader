@@ -207,3 +207,5 @@
   font: bold 2.25rem monospace;
   letter-spacing: .18em;
 }
+.pairing-screen [data-choices]:not([hidden]) { display: grid; gap: 8px; }
+.pairing-screen [data-request] { background: #173c52; color: white; }

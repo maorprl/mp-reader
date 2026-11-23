@@ -84,30 +84,43 @@ export function showPairingScreen(root, onConnectionChange) {
   root.innerHTML = `<main class="library pairing-screen">
     <h1>mp-reader</h1>
     <h2>חיבור לספרייה</h2>
-    <button type="button" data-request>הצג קוד צימוד</button>
+    <div data-choices>
+      <button type="button" data-request>הצטרף לספרייה קיימת</button>
+      <button type="button" data-create>צור ספרייה חדשה</button>
+    </div>
     <output dir="ltr" data-code aria-live="polite"></output>
-    <form><label>קוד צימוד ישן <input name="code" dir="ltr" autocomplete="off" required></label>
-      <button>חבר מכשיר</button></form>
-    <button type="button" data-create>צור ספרייה חדשה</button>
     <p role="status"></p>
+    <button type="button" data-cancel hidden>חזרה</button>
   </main>`;
-  const form = root.querySelector('form');
   const status = root.querySelector('[role=status]');
-  const buttons = root.querySelectorAll('button');
+  const choices = root.querySelector('[data-choices]');
+  const buttons = choices.querySelectorAll('button');
   const requestButton = root.querySelector('[data-request]');
+  const cancel = root.querySelector('[data-cancel]');
   const output = root.querySelector('[data-code]');
   let requestAttempt = 0;
+  function showChoices() {
+    ++requestAttempt;
+    choices.hidden = false;
+    cancel.hidden = true;
+    output.textContent = '';
+    requestButton.disabled = false;
+  }
+  cancel.onclick = () => {
+    showChoices();
+    status.textContent = '';
+  };
   requestButton.onclick = async () => {
     const attempt = ++requestAttempt;
     const proof = crypto.randomUUID().replaceAll('-', '');
-    output.textContent = '';
-    requestButton.disabled = true;
+    choices.hidden = true;
+    cancel.hidden = false;
+    status.textContent = 'מבקש קוד צימוד…';
     try {
       const {code} = await call('/device-request', {proof});
       if (!output.isConnected || attempt !== requestAttempt) return;
       output.textContent = code;
-      status.textContent = 'במכשיר שכבר מחובר, בחר סנכרון מכשירים והזן שם את הקוד.';
-      requestButton.disabled = false;
+      status.textContent = 'במחשב או בטלפון שכבר מחובר, פתח „סנכרון מכשירים”, הזן את הקוד ולחץ „אשר צימוד”.';
       const deadline = Date.now() + 300000;
       while (Date.now() < deadline) {
         await new Promise(resolve => setTimeout(resolve, 3000));
@@ -127,39 +140,36 @@ export function showPairingScreen(root, onConnectionChange) {
         }
       }
       if (attempt === requestAttempt) {
-        output.textContent = '';
+        showChoices();
         status.textContent = 'תוקף הקוד פג. אפשר להציג קוד חדש.';
       }
     } catch (error) {
       console.error(error);
-      if (attempt === requestAttempt) status.textContent = 'לא ניתן להציג קוד כרגע.';
-    } finally {
-      if (attempt === requestAttempt && !isPaired()) requestButton.disabled = false;
+      if (attempt === requestAttempt) {
+        showChoices();
+        status.textContent = 'לא ניתן להציג קוד כרגע.';
+      }
     }
   };
-  async function connect(path, payload) {
+  async function createLibrary() {
     if (buttons[0].disabled || isPaired()) return;
     ++requestAttempt;
     output.textContent = '';
     buttons.forEach(button => { button.disabled = true; });
     status.textContent = 'מתחבר…';
     try {
-      const {token} = await call(path, payload);
+      const {token} = await call('/create');
       localStorage.setItem(scopeKey, crypto.randomUUID());
       localStorage.setItem(tokenKey, token);
       await onConnectionChange();
     } catch (error) {
       console.error(error);
-      status.textContent = 'החיבור לא הושלם. בדוק את האינטרנט ואת קוד הצימוד.';
+      status.textContent = 'יצירת הספרייה נכשלה. בדוק את החיבור לאינטרנט.';
     } finally {
       buttons.forEach(button => { button.disabled = false; });
     }
   }
-  form.onsubmit = event => {
-    event.preventDefault();
-    connect('/join', {code: form.elements.code.value.trim().toLowerCase()});
-  };
-  root.querySelector('[data-create]').onclick = () => connect('/create');
+  root.querySelector('[data-create]').onclick = createLibrary;
 }
 
 export function setupSync(button, onConnectionChange) {
@@ -171,14 +181,11 @@ export function setupSync(button, onConnectionChange) {
       <form data-approve><label>הוסף מכשיר לפי הקוד שמופיע עליו
         <input name="code" dir="ltr" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required>
       </label><button>אשר צימוד</button></form>
-      <button type="button" data-pair>צור קוד ארוך למכשיר ישן</button>
       <button type="button" data-disconnect>נתק מכשיר</button>
-      <output dir="ltr" style="overflow-wrap:anywhere"></output>
       <p role="status"></p>
       <button type="button" data-close>סגור</button>`;
     document.body.append(panel);
     const status = panel.querySelector('[role=status]');
-    const pair = panel.querySelector('[data-pair]');
     const disconnect = panel.querySelector('[data-disconnect]');
     const approval = panel.querySelector('[data-approve]');
     approval.onsubmit = async event => {
@@ -193,18 +200,6 @@ export function setupSync(button, onConnectionChange) {
         status.textContent = 'הקוד לא נמצא או פג. בדוק את הקוד במכשיר שמצטרף.';
       } finally {
         submit.disabled = disconnect.disabled = false;
-      }
-    };
-    pair.onclick = async () => {
-      pair.disabled = disconnect.disabled = true;
-      try {
-        const {code} = await call('/pair');
-        panel.querySelector('output').textContent = code;
-        status.textContent = 'הקוד תקף לעשר דקות ולשימוש אחד.';
-      } catch {
-        status.textContent = 'לא ניתן ליצור קוד. בדוק את החיבור לאינטרנט.';
-      } finally {
-        pair.disabled = disconnect.disabled = false;
       }
     };
     disconnect.onclick = () => {
