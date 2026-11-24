@@ -213,7 +213,7 @@ state.rendition = state.epub.renderTo(view, {width:'100%', height:'100%', flow:'
   spread:'none', defaultDirection:direction});state.rendition.themes.register('paper',{body:{background:'#fffdf7 !important',color:'#302c28 !important'}});state.rendition.themes.register('night',{body:{background:'#20252b !important',color:'#f0eeee !important'}});state.rendition.themes.select(state.night?'night':'paper');state.rendition.themes.fontSize(state.font+'%');const progress = trackEpubProgress(state.epub, state.rendition, book, labels, token);
 state.epubProgress = progress;
 state.readerTools = new AbortController();
-attachReaderTools({root: app, book, rendition: state.rendition, language,
+const tools = attachReaderTools({root: app, book, rendition: state.rendition, language,
   direction: state.epub.packaging?.metadata?.direction || direction, progress, navigate,
   persist: () => saveReadingState(book), signal: state.readerTools.signal});
 const displayed = state.rendition.display(book.location || undefined);
@@ -221,7 +221,36 @@ progress.indexed = displayed.then(() => {
   if (state.token === token) return progress.index();
 }, () => {});
 await displayed;
+if (state.token === token) watchReadingState(book, state.rendition, progress, tools, state.readerTools.signal);
 if(state.token!==token)return;const navigation=await state.epub.loaded.navigation;if(state.token!==token)return;const toc=app.querySelector('#toc-list');toc.replaceChildren();for(const item of navigation.toc||[]){const b=document.createElement('button');b.textContent=item.label;b.dir='auto';b.style.textAlign='start';b.onclick=async()=>{if (state.epubProgress.resizing) return;app.querySelector('#toc-panel').hidden=true;state.epubProgress.anchor = null;await state.rendition.display(item.href);};toc.append(b);}}}catch(err){if(state.token!==token)return;console.error(err);app.querySelector('#viewport').textContent=labels.openError;message(labels.errorNotice);}}
+function watchReadingState(book, rendition, progress, tools, signal) {
+  let running = false;
+  const canApply = () => !signal.aborted && !progress.resizing && Boolean(progress.anchor) && tools.canRefresh();
+  async function refreshOpenBook() {
+    if (running || document.visibilityState === 'hidden' || !canApply()) return;
+    running = true;
+    try {
+      await syncBook(book, async updated => {
+        const moved = updated.location && updated.location !== progress.anchor;
+        if (moved) progress.anchor = updated.location;
+        await saveBook(updated);
+        if (signal.aborted) return;
+        tools.refresh();
+        if (moved && progress.anchor === updated.location) await rendition.display(updated.location);
+      }, canApply);
+    } catch (error) {
+      if (!signal.aborted) console.error(error);
+    } finally {
+      running = false;
+    }
+  }
+  const timer = setInterval(refreshOpenBook, 7000);
+  signal.addEventListener('abort', () => clearInterval(timer), {once:true});
+  window.addEventListener('focus', refreshOpenBook, {signal});
+  window.addEventListener('online', refreshOpenBook, {signal});
+  document.addEventListener('visibilitychange', refreshOpenBook, {signal});
+}
+
 async function saveReadingState(book) {
   await saveBook(book);
   syncBook(book).catch(console.error);

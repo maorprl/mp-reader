@@ -31,7 +31,7 @@ async function identify(book) {
   return book.syncHash;
 }
 
-export async function syncBook(book, persist) {
+export async function syncBook(book, persist, canApply = () => true) {
   if (book.localLibrary && book.localLibrary !== localLibrary()) return;
   const token = localStorage.getItem(tokenKey);
   if (!token || book.type !== 'epub') return;
@@ -52,14 +52,14 @@ export async function syncBook(book, persist) {
     }
     const {fields: remote} = await call('/book', {book: hash, changes}, token);
     if (localStorage.getItem(tokenKey) !== token) return;
+    const apply = Boolean(persist && canApply());
     let changed = false;
     for (const field of fields) {
       if (!remote[field]) continue;
       const current = book[field] ?? (field === 'location' ? null : []);
       if (JSON.stringify(current) !== JSON.stringify(snapshot[field])) continue;
       if (JSON.stringify(snapshot[field]) === JSON.stringify(remote[field].value)) continue;
-      // Keep active reader state stable. Pull remote changes on the next open.
-      if (!persist) continue;
+      if (!apply) continue;
       if (Array.isArray(book[field])) book[field].splice(0, book[field].length, ...remote[field].value);
       else book[field] = remote[field].value;
       changed = true;
@@ -67,7 +67,7 @@ export async function syncBook(book, persist) {
     if (changed) await persist(book);
     const acknowledged = Object.fromEntries(fields.flatMap(field => {
       if (!remote[field]) return [];
-      if (persist || JSON.stringify(snapshot[field]) === JSON.stringify(remote[field].value)) return [[field, remote[field]]];
+      if ((apply && JSON.stringify(book[field] ?? (field === 'location' ? null : [])) === JSON.stringify(remote[field].value)) || JSON.stringify(snapshot[field]) === JSON.stringify(remote[field].value)) return [[field, remote[field]]];
       return baseline[field] ? [[field, baseline[field]]] : [];
     }));
     localStorage.setItem(key, JSON.stringify(acknowledged));

@@ -435,6 +435,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       item.append(listButton(t.passage, () => jump(target)),
         listButton(t.edit, () => openHighlightEditor(entry)), listButton(t.remove, async () => {
         rendition.annotations.remove(entry.cfi, 'highlight');
+        painted.delete(entry.cfi);
         highlights.splice(index, 1);
         if (selected === entry) {
           selected = null;
@@ -446,6 +447,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     });
   }
   function paint(entry) {
+    painted.add(entry.cfi);
     rendition.annotations.highlight(entry.cfi, {}, () => openHighlightEditor(entry), 'reader-highlight', {
       fill: '#ffd548', 'fill-opacity': '0.38', 'mix-blend-mode': 'normal',
     });
@@ -501,6 +503,22 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     showHighlights();
     await persist().catch(report);
   };
+  let painted = new Set(highlights.map(entry => entry.cfi));
   highlights.forEach(paint);
   showHighlights();
+  return {
+    canRefresh: () => !selected && !draft,
+    refresh() {
+      const current = new Set(highlights.map(entry => entry.cfi));
+      for (const cfi of painted) {
+        if (!current.has(cfi)) rendition.annotations.remove(cfi, 'highlight');
+      }
+      for (const entry of highlights) {
+        if (!painted.has(entry.cfi)) paint(entry);
+      }
+      painted = current;
+      showBookmarks();
+      showHighlights();
+    },
+  };
 }
