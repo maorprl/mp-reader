@@ -100,6 +100,8 @@ export function attachReaderTools({root, book, rendition, language, direction, p
   const compact = window.matchMedia('(max-width: 620px)');
   const viewport = root.querySelector('#viewport');
   const toolsButton = document.createElement('button');
+  toolsButton.type = 'button';
+  toolsButton.className = 'open-reader-tools';
   toolsButton.textContent = t.tools;
   toolsButton.setAttribute('aria-expanded', 'false');
   toolsButton.setAttribute('aria-controls', 'reader-tools');
@@ -153,14 +155,18 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       <ul data-highlight-list></ul>
     </details>
     <p data-error role="status"></p>`;
-  root.querySelector('.settings').append(toolsButton);
   root.querySelector('.reader').append(panel);
   const query = selector => panel.querySelector(selector);
   const settings = root.querySelector('.settings');
   const appearance = settings.querySelector('.appearance-controls');
   function arrangeAppearance() {
-    if (compact.matches) query('[data-appearance]').append(appearance);
-    else settings.prepend(appearance);
+    if (compact.matches) {
+      query('[data-appearance]').append(appearance);
+      root.querySelector('.epub-progress').append(toolsButton);
+    } else {
+      settings.prepend(appearance);
+      settings.append(toolsButton);
+    }
   }
   compact.addEventListener('change', arrangeAppearance, {signal});
   arrangeAppearance();
@@ -192,7 +198,10 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     if (show) root.querySelector('#toc-panel').hidden = true;
   }
 
-  toolsButton.onclick = () => showPanel(panel.hidden);
+  toolsButton.onclick = () => {
+    showPanel(true);
+    query('[data-close]').focus();
+  };
   query('[data-close]').onclick = () => {
     showPanel(false);
     toolsButton.focus();

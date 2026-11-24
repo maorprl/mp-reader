@@ -198,3 +198,19 @@
 }
 .pairing-screen [data-choices]:not([hidden]) { display: grid; gap: 8px; }
 .pairing-screen [data-request] { background: #173c52; color: white; }
+
+@media (max-width: 620px) {
+  .reader:has(.epub-progress) { padding-block-end: 48px; }
+  .epub-progress {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-inline: 10px;
+  }
+  .epub-progress .open-reader-tools {
+    min-height: 44px;
+    margin-block: 2px;
+  }
+  .reader-tools { bottom: 48px; }
+}
