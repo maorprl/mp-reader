@@ -1,10 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="app.mpreader.sync2"
-    android:versionCode="16"
-    android:versionName="2.5.0">
+    android:versionCode="17"
+    android:versionName="2.6.0">
     <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="35" />
     <uses-permission android:name="android.permission.INTERNET" />
-    <application android:allowBackup="false" android:label="mp-reader 2.5"
+    <application android:allowBackup="false" android:label="mp-reader 2.6"
         android:icon="@drawable/ic_reader" android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <activity android:name="app.mpreader.sync2.ReaderActivity" android:exported="true" android:launchMode="singleTop">
             <intent-filter>

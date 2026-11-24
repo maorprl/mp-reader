@@ -5,7 +5,7 @@ const translations = {
     tools: 'כלי קריאה', close: 'סגור', bookmarks: 'סימניות', add: 'הוסף סימנייה כאן',
     bookmark: 'סימנייה', search: 'חיפוש בספר', find: 'חפש', searching: 'מחפש…',
     noResults: 'לא נמצאו תוצאות.', limit: 'מוצגות 100 התוצאות הראשונות.',
-    appearance: 'גופן ותצוגה', theme: 'מצב צבע', brightness: 'בהירות', system: 'בהירות המכשיר', themes: ['יום', 'ספיה', 'לילה', 'קונסול'], layout: 'פריסת הקריאה', width: 'רוחב', spacing: 'ריווח שורות', margins: 'שוליים מהצדדים',
+    appearance: 'גופן ותצוגה', theme: 'מצב צבע', brightness: 'בהירות העמוד', system: 'אפס עמעום', themes: ['יום', 'ספיה', 'לילה', 'קונסול'], layout: 'פריסת הקריאה', width: 'רוחב', spacing: 'ריווח שורות', margins: 'שוליים מהצדדים',
     apply: 'החל', reset: 'ברירת מחדל', highlights: 'הדגשות והערות',
     select: 'בחר טקסט בספר כדי להדגיש אותו או להוסיף הערה.', note: 'הערה',
     save: 'שמור הדגשה', cancel: 'בטל', edit: 'ערוך הערה', update: 'שמור הערה', remove: 'הסר',
@@ -16,7 +16,7 @@ const translations = {
     tools: 'Reading tools', close: 'Close', bookmarks: 'Bookmarks', add: 'Bookmark this location',
     bookmark: 'Bookmark', search: 'Search book', find: 'Search', searching: 'Searching…',
     noResults: 'No matches found.', limit: 'Showing the first 100 matches.',
-    appearance: 'Font and display', theme: 'Color mode', brightness: 'Brightness', system: 'System brightness', themes: ['Day', 'Sepia', 'Night', 'Console'], layout: 'Reading layout', width: 'Width', spacing: 'Line spacing', margins: 'Side margins',
+    appearance: 'Font and display', theme: 'Color mode', brightness: 'Page brightness', system: 'Reset dimming', themes: ['Day', 'Sepia', 'Night', 'Console'], layout: 'Reading layout', width: 'Width', spacing: 'Line spacing', margins: 'Side margins',
     apply: 'Apply', reset: 'Reset', highlights: 'Highlights and notes',
     select: 'Select text in the book to highlight it or add a note.', note: 'Note',
     save: 'Save highlight', cancel: 'Cancel', edit: 'Edit note', update: 'Save note', remove: 'Remove',
@@ -130,14 +130,12 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     <details class="reader-appearance">
       <summary>${t.appearance}</summary>
       <div data-appearance></div>
-      <label class="display-setting">${t.theme}
-        <select data-theme-choice>
-          ${['day','sepia','night','console'].map((value, index) => `<option value="${value}">${t.themes[index]}</option>`).join('')}
-        </select>
-      </label>
-      <div data-brightness hidden>
+      <div class="theme-choices" role="group" aria-label="${t.theme}">
+        ${['day','sepia','night','console'].map((value, index) => `<button type="button" data-reading-theme="${value}" aria-pressed="${value === theme}">${t.themes[index]}</button>`).join('')}
+      </div>
+      <div>
         <label class="display-setting">${t.brightness}
-          <input type="range" min="1" max="100" value="50" data-brightness-level>
+          <input type="range" min="20" max="100" value="100" data-brightness-level>
         </label>
         <button type="button" data-brightness-reset>${t.system}</button>
       </div>
@@ -181,29 +179,31 @@ export function attachReaderTools({root, book, rendition, language, direction, p
   }
   compact.addEventListener('change', arrangeAppearance, {signal});
   arrangeAppearance();
-  const themeChoice = query('[data-theme-choice]');
-  themeChoice.value = theme;
-  themeChoice.onchange = () => setTheme(themeChoice.value);
-  const brightness = window.ReaderDisplay;
-  if (typeof brightness?.setBrightness === 'function') {
-    const key = 'reader-brightness';
-    const slider = query('[data-brightness-level]');
-    query('[data-brightness]').hidden = false;
-    const saved = localStorage.getItem(key);
-    if (saved !== null) {
-      slider.value = saved;
-      brightness.setBrightness(Number(slider.value));
-    }
-    slider.oninput = () => {
-      localStorage.setItem(key, slider.value);
-      brightness.setBrightness(Number(slider.value));
-    };
-    query('[data-brightness-reset]').onclick = () => {
-      localStorage.removeItem(key);
-      slider.value = '50';
-      brightness.setBrightness(-1);
+  const themeButtons = panel.querySelectorAll('[data-reading-theme]');
+  for (const button of themeButtons) {
+    button.onclick = () => {
+      setTheme(button.dataset.readingTheme);
+      for (const option of themeButtons) {
+        option.setAttribute('aria-pressed', String(option === button));
+      }
     };
   }
+  const brightnessKey = 'reader-page-brightness';
+  const slider = query('[data-brightness-level]');
+  slider.value = localStorage.getItem(brightnessKey) ?? '100';
+  function applyBrightness() {
+    viewport.style.filter = Number(slider.value) === 100 ? '' : 'brightness(' + slider.value + '%)';
+  }
+  slider.oninput = () => {
+    localStorage.setItem(brightnessKey, slider.value);
+    applyBrightness();
+  };
+  query('[data-brightness-reset]').onclick = () => {
+    slider.value = '100';
+    localStorage.removeItem(brightnessKey);
+    applyBrightness();
+  };
+  applyBrightness();
   const zoomStatus = document.createElement('output');
   zoomStatus.className = 'font-gesture-status';
   zoomStatus.hidden = true;

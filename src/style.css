@@ -201,7 +201,23 @@
 .stage[data-theme="console"] .viewport { background: #171c18; color: #b6e3ab; }
 .stage[data-theme="night"], .stage[data-theme="console"] { background: #17191c; }
 .display-setting { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-block: 10px; }
-.display-setting select { font: inherit; }
+.theme-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-block: 10px;
+}
+.theme-choices button {
+  margin: 0;
+  min-height: 44px;
+  text-align: center;
+  border: 1px solid #b4c0c8;
+}
+.theme-choices button[aria-pressed="true"] {
+  background: #163041;
+  color: #fff;
+  border-color: #163041;
+}
 .font-gesture-status:not([hidden]) {
   display: block;
   position: absolute;

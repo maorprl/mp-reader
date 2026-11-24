@@ -15,8 +15,6 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.webkit.JavascriptInterface;
-import android.view.WindowManager;
 import android.view.WindowInsets;
 import android.widget.Toast;
 import org.json.JSONObject;
@@ -48,7 +46,6 @@ public final class ReaderActivity extends Activity {
         settings.setAllowContentAccess(true);
         settings.setAllowFileAccess(false);
 
-        reader.addJavascriptInterface(new ReaderDisplay(), "ReaderDisplay");
         reader.setWebViewClient(new WebViewClient() {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
@@ -126,19 +123,6 @@ public final class ReaderActivity extends Activity {
         setContentView(reader);
         receiveBook(getIntent());
         reader.loadUrl(ORIGIN + "/index.html");
-    }
-
-    public final class ReaderDisplay {
-        @JavascriptInterface
-        public void setBrightness(int percent) {
-            if (percent != -1 && (percent < 1 || percent > 100)) return;
-            runOnUiThread(() -> {
-                WindowManager.LayoutParams attributes = getWindow().getAttributes();
-                attributes.screenBrightness = percent == -1
-                        ? WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE : percent / 100f;
-                getWindow().setAttributes(attributes);
-            });
-        }
     }
 
     @Override
