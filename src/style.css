@@ -248,3 +248,9 @@
   }
   .reader-tools { bottom: 48px; }
 }
+
+@media (max-width: 620px) {
+  .reading-clean .controls:has(.epub-progress) > .nav { display: flex; }
+  .reader:has(.epub-progress) { padding-block-end: 90px; }
+  .reader-tools { bottom: 90px; }
+}

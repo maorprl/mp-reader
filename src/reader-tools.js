@@ -271,11 +271,22 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     let press;
     let navigating = false;
     let pinch;
+    let touchPress;
     const distance = touches => Math.hypot(
       touches[0].clientX - touches[1].clientX,
       touches[0].clientY - touches[1].clientY,
     );
     target.addEventListener('touchstart', event => {
+      touchPress = null;
+      if (event.touches.length === 1 && !pinch) {
+        const point = event.touches[0];
+        touchPress = {
+          id: point.identifier, x: point.clientX, y: point.clientY,
+          start: event.timeStamp, target: event.target,
+          hadSelection: Boolean(draft || contents?.window.getSelection()?.toString()),
+        };
+        return;
+      }
       if (event.touches.length !== 2 || (!contents && !viewport.contains(event.target)) ||
           draft || contents?.window.getSelection()?.toString()) return;
       press = null;
@@ -284,13 +295,22 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       if (event.cancelable) event.preventDefault();
     }, {...options, passive: false});
     target.addEventListener('touchmove', event => {
+      if (touchPress && event.touches.length === 1 &&
+          Math.hypot(event.touches[0].clientX - touchPress.x, event.touches[0].clientY - touchPress.y) > 18) touchPress = null;
       if (!pinch || event.touches.length !== 2) return;
       if (event.cancelable) event.preventDefault();
       if (pinch.start > 0) pinch.ratio = distance(event.touches) / pinch.start;
       showFont(pinchSteps(pinch.ratio));
     }, {...options, passive: false});
     target.addEventListener('touchend', event => {
-      if (!pinch || event.touches.length >= 2) return;
+      if (!pinch) {
+        const start = touchPress;
+        touchPress = null;
+        const point = Array.from(event.changedTouches).find(touch => touch.identifier === start?.id);
+        if (point && event.touches.length === 0) activateTap(start, point, event);
+        return;
+      }
+      if (event.touches.length >= 2) return;
       const {ratio} = pinch;
       pinch = null;
       press = null;
@@ -304,12 +324,12 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       if (pinch) zoomStatus.hidden = true;
       pinch = null;
       press = null;
+      touchPress = null;
     }, options);
     target.addEventListener('pointerdown', event => {
-      if (pinch || !event.isPrimary || event.button !== 0) return;
+      if (pinch || event.pointerType === 'touch' || !event.isPrimary || event.button !== 0) return;
       press = {
         id: event.pointerId,
-        type: event.pointerType,
         x: event.clientX,
         y: event.clientY,
         start: event.timeStamp,
@@ -317,22 +337,18 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       };
     }, options);
     target.addEventListener('pointercancel', () => { press = null; }, options);
-    async function activateTap(event) {
-      if (event.type === 'click' && press?.type === 'touch') return;
-      const start = press;
-      press = null;
-      if (!start || (event.pointerId > 0 && event.pointerId !== start.id) || (event.type === 'click' && event.detail !== 1) ||
-          event.timeStamp - start.start > 450 ||
-          Math.hypot(event.clientX - start.x, event.clientY - start.y) > 18 ||
+    async function activateTap(start, point, event) {
+      if (event.timeStamp - start.start > 450 ||
+          Math.hypot(point.clientX - start.x, point.clientY - start.y) > 18 ||
           event.defaultPrevented || navigating || progress.resizing || signal.aborted ||
-          event.target?.closest?.('a, button, input, textarea, select, label, video, audio, [contenteditable], .reader-highlight, .highlight-confirmation')) return;
+          (start.target ?? event.target)?.closest?.('a, button, input, textarea, select, label, video, audio, [contenteditable], .reader-highlight, .highlight-confirmation')) return;
       if (contents?.window.getSelection()?.toString()) return;
       if (start.hadSelection || draft) {
         clearDraft();
         return;
       }
       const frame = contents?.window.frameElement;
-      const x = event.clientX + (frame?.getBoundingClientRect().left ?? 0);
+      const x = point.clientX + (frame?.getBoundingClientRect().left ?? 0);
       const {left, width} = viewport.getBoundingClientRect();
       if (!width) return;
       const position = (x - left) / width;
@@ -353,10 +369,13 @@ export function attachReaderTools({root, book, rendition, language, direction, p
         navigating = false;
       }
     }
-    target.addEventListener('pointerup', event => {
-      if (event.pointerType === 'touch') activateTap(event);
+    target.addEventListener('click', event => {
+      const start = press;
+      press = null;
+      if (start && event.detail === 1 && (!event.pointerId || event.pointerId === start.id)) {
+        activateTap(start, event, event);
+      }
     }, options);
-    target.addEventListener('click', activateTap, options);
   }
 
   bindPageTaps(stage, null, {signal});
