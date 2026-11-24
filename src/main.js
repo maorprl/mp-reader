@@ -225,7 +225,7 @@ if (state.token === token) watchReadingState(book, state.rendition, progress, to
 if(state.token!==token)return;const navigation=await state.epub.loaded.navigation;if(state.token!==token)return;const toc=app.querySelector('#toc-list');toc.replaceChildren();for(const item of navigation.toc||[]){const b=document.createElement('button');b.textContent=item.label;b.dir='auto';b.style.textAlign='start';b.onclick=async()=>{if (state.epubProgress.resizing) return;app.querySelector('#toc-panel').hidden=true;state.epubProgress.anchor = null;await state.rendition.display(item.href);};toc.append(b);}}}catch(err){if(state.token!==token)return;console.error(err);app.querySelector('#viewport').textContent=labels.openError;message(labels.errorNotice);}}
 function watchReadingState(book, rendition, progress, tools, signal) {
   let running = false;
-  const canApply = () => !signal.aborted && !progress.resizing && Boolean(progress.anchor) && tools.canRefresh();
+  const canApply = () => !signal.aborted && !progress.resizing && !progress.navigating && Boolean(progress.anchor) && tools.canRefresh();
   async function refreshOpenBook() {
     if (running || document.visibilityState === 'hidden' || !canApply()) return;
     running = true;
@@ -345,7 +345,33 @@ function trackEpubProgress(epub, rendition, book, labels, token) {
 }
 
 async function drawPdf(){if(!state.pdf||!state.book)return;const token=state.token;const pageNumber=state.page;const page=await state.pdf.getPage(pageNumber);if(token!==state.token||pageNumber!==state.page)return;const scale=state.zoom;const viewport=page.getViewport({scale});const canvas=document.createElement('canvas');const dpr=Math.min(window.devicePixelRatio||1,2);canvas.width=Math.ceil(viewport.width*dpr);canvas.height=Math.ceil(viewport.height*dpr);canvas.style.width=viewport.width+'px';canvas.style.height=viewport.height+'px';const context=canvas.getContext('2d');await page.render({canvasContext:context,viewport,transform:dpr!==1?[dpr,0,0,dpr,0,0]:undefined}).promise;if(token!==state.token||pageNumber!==state.page)return;const target=app.querySelector('#viewport');target.replaceChildren(canvas);target.classList.add('pdf');app.querySelector('#position').textContent=pageNumber+' / '+state.pdf.numPages;state.book.location=pageNumber;state.book.progress='עמוד '+pageNumber+' מתוך '+state.pdf.numPages;await saveBook(state.book);}
-async function navigate(n){if(state.pdf){state.page=Math.max(1,Math.min(state.pdf.numPages,state.page+n));await drawPdf();}else if(state.rendition && !state.epubProgress?.resizing){state.epubProgress.anchor = null;if(n>0)await state.rendition.next();else await state.rendition.prev();}}
+async function navigate(n) {
+  if (state.pdf) {
+    state.page = Math.max(1, Math.min(state.pdf.numPages, state.page + n));
+    await drawPdf();
+    return;
+  }
+  const {rendition, epub, epubProgress: progress} = state;
+  if (!rendition || !progress || progress.resizing || progress.navigating) return;
+
+  const current = rendition.currentLocation()?.start;
+  let nextSection;
+  // In RTL the renderer can try to scroll past the last column of a section.
+  if (n > 0 && current?.displayed?.total > 0 && current.displayed.page >= current.displayed.total) {
+    nextSection = epub.spine.get(current.index)?.next();
+    if (!nextSection) return;
+  }
+
+  progress.navigating = true;
+  progress.anchor = null;
+  try {
+    if (nextSection) await rendition.display(nextSection.href);
+    else if (n > 0) await rendition.next();
+    else await rendition.prev();
+  } finally {
+    progress.navigating = false;
+  }
+}
 async function changeSize(n){if(state.pdf){state.zoom=Math.max(.5,Math.min(3,state.zoom+n*.2));app.querySelector('#size-label').textContent=Math.round(state.zoom*100)+'%';await drawPdf();}else if (state.epubProgress && !state.epubProgress.resizing) {
   const font = Math.max(70, Math.min(200, state.font + n * 10));
   if (font === state.font) return;
