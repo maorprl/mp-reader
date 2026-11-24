@@ -109,12 +109,19 @@ async function configuredLibrary(db, selected) {
   if (selected) {
     return db.prepare('SELECT library FROM (' + libraries + ') WHERE library=?').bind(selected).first();
   }
+  await db.prepare('CREATE TABLE IF NOT EXISTS sync_primary_library (slot INTEGER PRIMARY KEY, library TEXT NOT NULL)').run();
+  const primary = db.prepare('SELECT library FROM sync_primary_library WHERE slot=1');
+  const saved = await primary.first();
+  if (saved) return saved;
+
   const {results} = await db.prepare(
-    'SELECT library FROM (' + libraries + ') WHERE library IN (SELECT library FROM sync_catalog UNION SELECT library FROM sync_fields) LIMIT 2'
+    'SELECT library FROM (SELECT library FROM sync_catalog UNION SELECT library FROM sync_fields UNION SELECT library FROM sync_recovery) LIMIT 2'
   ).all();
-  if (results.length) return results.length === 1 ? results[0] : null;
-  const empty = await db.prepare(libraries + ' LIMIT 2').all();
-  return empty.results.length === 1 ? empty.results[0] : null;
+  if (results.length > 1) return null;
+  const empty = results.length ? [] : (await db.prepare(libraries + ' LIMIT 2').all()).results;
+  const library = results[0]?.library ?? (empty.length === 1 ? empty[0].library : secret());
+  await db.prepare('INSERT OR IGNORE INTO sync_primary_library VALUES (1,?)').bind(library).run();
+  return primary.first();
 }
 
 export default {
@@ -134,7 +141,7 @@ export default {
     try {
       if (request.method === 'GET' && path === '/') {
         const result = await env.DB.prepare('SELECT 1 AS ok').first();
-        return reply({databaseConnected: result.ok === 1, syncVersion: 5});
+        return reply({databaseConnected: result.ok === 1, syncVersion: 7});
       }
       if (request.method !== 'POST') return reply({error: 'method'}, 405);
 
