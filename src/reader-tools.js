@@ -89,7 +89,7 @@ function chapterLookup(epub, signal) {
   };
 }
 
-export function attachReaderTools({root, book, rendition, language, direction, progress, navigate, persist, signal}) {
+export function attachReaderTools({root, book, rendition, language, direction, progress, navigate, changeSize, persist, signal}) {
   const t = translations[language];
   const chapterAt = chapterLookup(rendition.book, signal);
   const bookmarks = book.bookmarks ??= [];
@@ -214,8 +214,37 @@ export function attachReaderTools({root, book, rendition, language, direction, p
   function bindPageTaps(target, contents, options) {
     let press;
     let navigating = false;
+    let pinch;
+    const distance = touches => Math.hypot(
+      touches[0].clientX - touches[1].clientX,
+      touches[0].clientY - touches[1].clientY,
+    );
+    target.addEventListener('touchstart', event => {
+      if (event.touches.length !== 2 || (!contents && !viewport.contains(event.target)) ||
+          draft || contents?.window.getSelection()?.toString()) return;
+      press = null;
+      pinch = {start: distance(event.touches), ratio: 1};
+      if (event.cancelable) event.preventDefault();
+    }, {...options, passive: false});
+    target.addEventListener('touchmove', event => {
+      if (!pinch || event.touches.length !== 2) return;
+      if (event.cancelable) event.preventDefault();
+      if (pinch.start > 0) pinch.ratio = distance(event.touches) / pinch.start;
+    }, {...options, passive: false});
+    target.addEventListener('touchend', event => {
+      if (!pinch || event.touches.length >= 2) return;
+      const {ratio} = pinch;
+      pinch = null;
+      press = null;
+      if (event.cancelable) event.preventDefault();
+      if (ratio > 1.12 || ratio < 0.88) {
+        const steps = Math.sign(ratio - 1) * Math.max(1, Math.round(Math.abs(ratio - 1) * 10));
+        changeSize(steps).catch(report);
+      }
+    }, {...options, passive: false});
+    target.addEventListener('touchcancel', () => { pinch = null; press = null; }, options);
     target.addEventListener('pointerdown', event => {
-      if (!event.isPrimary || event.button !== 0) return;
+      if (pinch || !event.isPrimary || event.button !== 0) return;
       press = {
         id: event.pointerId,
         x: event.clientX,
@@ -244,7 +273,9 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       if (!width) return;
       const position = (x - left) / width;
       if (position > 0.3 && position < 0.7) {
-        if (compact.matches) reader.classList.toggle('reading-clean');
+        if (compact.matches && position >= 0.45 && position <= 0.55) {
+          reader.classList.toggle('reading-clean');
+        }
         return;
       }
       const forward = (position <= 0.3) === (direction === 'rtl');
@@ -265,6 +296,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
   rendition.on('keydown', handleKeys);
   rendition.hooks.content.register(contents => {
     bindPageTaps(contents.document, contents);
+    contents.addStylesheetRules({ html: {'touch-action': 'pan-x pan-y'} });
     const spacing = book.layout.spacing;
     if (spacing) {
       contents.addStylesheetRules({

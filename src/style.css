@@ -108,7 +108,6 @@
   align-items: center;
   gap: 8px;
 }
-.progress-summary,
 .mobile-appearance {
   display: none;
 }
@@ -142,20 +141,10 @@
     display: none;
   }
   .epub-progress .progress-summary {
-    display: inline-block;
-    min-width: 72px;
+    display: inline-flex;
     min-height: 37px;
-    padding: 4px 12px;
-    border: 0;
-    background: transparent;
-    color: inherit;
-  }
-  .epub-progress .progress-detail {
-    display: none;
-  }
-  .epub-progress.expanded .progress-detail {
-    display: block;
-    padding: 0 8px 8px;
+    align-items: center;
+    font-variant-numeric: tabular-nums;
   }
   .reader-tools {
     z-index: 6;
