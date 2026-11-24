@@ -89,11 +89,11 @@ async function shareLibrary(button) {
 
 function library(){document.title='mp-reader · הספרייה';app.innerHTML=`
 <header class="top"><div class="brand">📖 mp-reader</div><button id="sync-devices" type="button">סנכרון מכשירים</button></header>
-<main class="library"><div class="hero"><div class="eyebrow">קורא ספרים אישי</div><h1>הספרייה שלי</h1><p>קוראים EPUB ו־PDF. ספרי EPUB יכולים להסתנכרן בין מכשירים מצומדים.</p></div>
+<main class="library"><div class="hero"><h1>הספרייה שלי</h1></div>
 <div class="actions">${isPaired() ? '<button type="button" id="share-library">סנכרן ספרים</button>' : ''}<h2>הספרים שלי <small>(${state.books.length})</small></h2><label class="primary">＋ הוספת ספרים<input id="pick" type="file" accept=".epub,.pdf" multiple hidden></label></div>
 <div class="grid">${state.books.map(b=>`<article class="tile"><button class="cover" data-open="${esc(b.id)}"><span class="cover-icon">${b.type==='pdf'?'PDF':'EPUB'}</span><strong>${esc(b.title)}</strong></button><div class="tile-foot"><button class="book-name" data-open="${esc(b.id)}">${esc(b.title)}</button><small>${esc(b.progress||'טרם נקרא')}</small>${b.remote ? '' : `<button class="delete" data-delete="${esc(b.id)}" aria-label="מחק עותק מקומי">🗑</button>`}</div></article>`).join('')}</div>
-${state.books.length?'':'<div class="empty">אין עדיין ספרים. בחר EPUB או PDF כדי להתחיל.</div>'}
-<p class="privacy">ספרי EPUB מסונכרנים נשמרים בענן ובמכשירים שהורידו אותם.</p></main><div id="notice" class="notice" hidden></div>`;
+${state.books.length?'':'<div class="empty">אין עדיין ספרים.</div>'}
+</main><div id="notice" class="notice" hidden></div>`;
 setupSync(app.querySelector('#sync-devices'), refresh);
 const share = app.querySelector('#share-library');
 if (share) share.onclick = () => shareLibrary(share);

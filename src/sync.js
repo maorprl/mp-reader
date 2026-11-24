@@ -119,36 +119,12 @@ export function setupSync(button, onConnectionChange) {
     const panel = document.createElement('dialog');
     panel.dir = 'rtl';
     panel.innerHTML = `<h2>סנכרון מכשירים</h2>
-      <button type="button" data-recovery>הגדר קוד כניסה קבוע</button>
-      <output data-recovery-code dir="ltr" style="display:block;overflow-wrap:anywhere"></output>
       <button type="button" data-disconnect>נתק מכשיר</button>
-      <p role="status"></p>
       <button type="button" data-close>סגור</button>`;
     document.body.append(panel);
-    const status = panel.querySelector('[role=status]');
     const disconnect = panel.querySelector('[data-disconnect]');
-    const recovery = panel.querySelector('[data-recovery]');
-    const recoveryOutput = panel.querySelector('[data-recovery-code]');
-    const recoveryKey = 'mp-reader-recovery:' + localStorage.getItem(tokenKey);
-    recovery.onclick = async () => {
-      const code = localStorage.getItem(recoveryKey) || crypto.randomUUID().replaceAll('-', '');
-      localStorage.setItem(recoveryKey, code);
-      recovery.disabled = disconnect.disabled = true;
-      try {
-        await call('/recovery-code', {code});
-        recoveryOutput.textContent = code.match(/.{8}/g).join('-');
-        status.textContent = 'שמור את קוד הכניסה במנהל סיסמאות. אותו קוד משמש לכניסה בכל מכשיר.';
-      } catch (error) {
-        status.textContent = error.message.includes('(409)')
-          ? 'כבר הוגדר קוד לספרייה. השתמש בעותק ששמרת או פתח את המכשיר שהגדיר אותו.'
-          : 'לא ניתן להפיק קוד כרגע. בדוק את החיבור לאינטרנט.';
-      } finally {
-        recovery.disabled = disconnect.disabled = false;
-      }
-    };
     disconnect.onclick = () => {
       if (!window.confirm('לנתק את המכשיר? לכניסה מחדש צריך את קוד הכניסה הקבוע.')) return;
-      localStorage.removeItem(recoveryKey);
       localStorage.removeItem(tokenKey);
       localStorage.removeItem(scopeKey);
       panel.close();
