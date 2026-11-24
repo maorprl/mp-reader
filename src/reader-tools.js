@@ -5,7 +5,7 @@ const translations = {
     tools: 'כלי קריאה', close: 'סגור', bookmarks: 'סימניות', add: 'הוסף סימנייה כאן',
     bookmark: 'סימנייה', search: 'חיפוש בספר', find: 'חפש', searching: 'מחפש…',
     noResults: 'לא נמצאו תוצאות.', limit: 'מוצגות 100 התוצאות הראשונות.',
-    appearance: 'גופן ומצב תצוגה', layout: 'פריסת הקריאה', width: 'רוחב', spacing: 'ריווח שורות', margins: 'שוליים מהצדדים',
+    appearance: 'גופן ותצוגה', theme: 'מצב צבע', brightness: 'בהירות', system: 'בהירות המכשיר', themes: ['יום', 'ספיה', 'לילה', 'קונסול'], layout: 'פריסת הקריאה', width: 'רוחב', spacing: 'ריווח שורות', margins: 'שוליים מהצדדים',
     apply: 'החל', reset: 'ברירת מחדל', highlights: 'הדגשות והערות',
     select: 'בחר טקסט בספר כדי להדגיש אותו או להוסיף הערה.', note: 'הערה',
     save: 'שמור הדגשה', cancel: 'בטל', edit: 'ערוך הערה', update: 'שמור הערה', remove: 'הסר',
@@ -16,7 +16,7 @@ const translations = {
     tools: 'Reading tools', close: 'Close', bookmarks: 'Bookmarks', add: 'Bookmark this location',
     bookmark: 'Bookmark', search: 'Search book', find: 'Search', searching: 'Searching…',
     noResults: 'No matches found.', limit: 'Showing the first 100 matches.',
-    appearance: 'Font and theme', layout: 'Reading layout', width: 'Width', spacing: 'Line spacing', margins: 'Side margins',
+    appearance: 'Font and display', theme: 'Color mode', brightness: 'Brightness', system: 'System brightness', themes: ['Day', 'Sepia', 'Night', 'Console'], layout: 'Reading layout', width: 'Width', spacing: 'Line spacing', margins: 'Side margins',
     apply: 'Apply', reset: 'Reset', highlights: 'Highlights and notes',
     select: 'Select text in the book to highlight it or add a note.', note: 'Note',
     save: 'Save highlight', cancel: 'Cancel', edit: 'Edit note', update: 'Save note', remove: 'Remove',
@@ -89,7 +89,7 @@ function chapterLookup(epub, signal) {
   };
 }
 
-export function attachReaderTools({root, book, rendition, language, direction, progress, navigate, changeSize, persist, signal}) {
+export function attachReaderTools({root, book, rendition, language, direction, progress, navigate, changeSize, fontAt, theme, setTheme, persist, signal}) {
   const t = translations[language];
   const chapterAt = chapterLookup(rendition.book, signal);
   const bookmarks = book.bookmarks ??= [];
@@ -127,9 +127,20 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       <button type="button" data-add>${t.add}</button>
       <ul data-bookmark-list></ul>
     </details>
-    <details class="mobile-appearance">
+    <details class="reader-appearance">
       <summary>${t.appearance}</summary>
       <div data-appearance></div>
+      <label class="display-setting">${t.theme}
+        <select data-theme-choice>
+          ${['day','sepia','night','console'].map((value, index) => `<option value="${value}">${t.themes[index]}</option>`).join('')}
+        </select>
+      </label>
+      <div data-brightness hidden>
+        <label class="display-setting">${t.brightness}
+          <input type="range" min="1" max="100" value="50" data-brightness-level>
+        </label>
+        <button type="button" data-brightness-reset>${t.system}</button>
+      </div>
     </details>
     <details data-layout>
       <summary>${t.layout}</summary>
@@ -170,6 +181,42 @@ export function attachReaderTools({root, book, rendition, language, direction, p
   }
   compact.addEventListener('change', arrangeAppearance, {signal});
   arrangeAppearance();
+  const themeChoice = query('[data-theme-choice]');
+  themeChoice.value = theme;
+  themeChoice.onchange = () => setTheme(themeChoice.value);
+  const brightness = window.ReaderDisplay;
+  if (typeof brightness?.setBrightness === 'function') {
+    const key = 'reader-brightness';
+    const slider = query('[data-brightness-level]');
+    query('[data-brightness]').hidden = false;
+    const saved = localStorage.getItem(key);
+    if (saved !== null) {
+      slider.value = saved;
+      brightness.setBrightness(Number(slider.value));
+    }
+    slider.oninput = () => {
+      localStorage.setItem(key, slider.value);
+      brightness.setBrightness(Number(slider.value));
+    };
+    query('[data-brightness-reset]').onclick = () => {
+      localStorage.removeItem(key);
+      slider.value = '50';
+      brightness.setBrightness(-1);
+    };
+  }
+  const zoomStatus = document.createElement('output');
+  zoomStatus.className = 'font-gesture-status';
+  zoomStatus.hidden = true;
+  stage.append(zoomStatus);
+  let zoomTimeout;
+  function showFont(steps) {
+    clearTimeout(zoomTimeout);
+    zoomStatus.textContent = fontAt(steps) + '%';
+    zoomStatus.hidden = false;
+  }
+  signal.addEventListener('abort', () => clearTimeout(zoomTimeout), {once:true});
+  const pinchSteps = ratio => ratio > 1.12 || ratio < 0.88
+    ? Math.sign(ratio - 1) * Math.max(1, Math.round(Math.abs(ratio - 1) * 10)) : 0;
   let selected;
   let draft;
   const confirmation = document.createElement('div');
@@ -233,12 +280,14 @@ export function attachReaderTools({root, book, rendition, language, direction, p
           draft || contents?.window.getSelection()?.toString()) return;
       press = null;
       pinch = {start: distance(event.touches), ratio: 1};
+      showFont(0);
       if (event.cancelable) event.preventDefault();
     }, {...options, passive: false});
     target.addEventListener('touchmove', event => {
       if (!pinch || event.touches.length !== 2) return;
       if (event.cancelable) event.preventDefault();
       if (pinch.start > 0) pinch.ratio = distance(event.touches) / pinch.start;
+      showFont(pinchSteps(pinch.ratio));
     }, {...options, passive: false});
     target.addEventListener('touchend', event => {
       if (!pinch || event.touches.length >= 2) return;
@@ -246,12 +295,16 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       pinch = null;
       press = null;
       if (event.cancelable) event.preventDefault();
-      if (ratio > 1.12 || ratio < 0.88) {
-        const steps = Math.sign(ratio - 1) * Math.max(1, Math.round(Math.abs(ratio - 1) * 10));
-        changeSize(steps).catch(report);
-      }
+      const steps = pinchSteps(ratio);
+      showFont(steps);
+      if (steps) changeSize(steps).catch(report);
+      zoomTimeout = setTimeout(() => { zoomStatus.hidden = true; }, 900);
     }, {...options, passive: false});
-    target.addEventListener('touchcancel', () => { pinch = null; press = null; }, options);
+    target.addEventListener('touchcancel', () => {
+      if (pinch) zoomStatus.hidden = true;
+      pinch = null;
+      press = null;
+    }, options);
     target.addEventListener('pointerdown', event => {
       if (pinch || !event.isPrimary || event.button !== 0) return;
       press = {

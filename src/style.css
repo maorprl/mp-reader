@@ -108,9 +108,6 @@
   align-items: center;
   gap: 8px;
 }
-.mobile-appearance {
-  display: none;
-}
 
 @media (max-width: 620px) {
   .reader:has(.epub-progress) {
@@ -153,10 +150,10 @@
   .reading-clean .reader-tools {
     top: 0;
   }
-  .mobile-appearance {
+  .reader-appearance {
     display: block;
   }
-  .mobile-appearance .appearance-controls button {
+  .reader-appearance .appearance-controls button {
     min-width: 44px;
     width: auto;
     text-align: center;
@@ -198,6 +195,27 @@
 }
 .pairing-screen [data-choices]:not([hidden]) { display: grid; gap: 8px; }
 .pairing-screen [data-request] { background: #173c52; color: white; }
+
+.stage[data-theme="sepia"] .viewport { background: #f1e2c5; color: #392d22; }
+.stage[data-theme="night"] .viewport { background: #20252b; color: #f0eeee; }
+.stage[data-theme="console"] .viewport { background: #171c18; color: #b6e3ab; }
+.stage[data-theme="night"], .stage[data-theme="console"] { background: #17191c; }
+.display-setting { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-block: 10px; }
+.display-setting select { font: inherit; }
+.font-gesture-status:not([hidden]) {
+  display: block;
+  position: absolute;
+  z-index: 4;
+  left: 50%;
+  top: 12%;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: #111;
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-weight: bold;
+}
 
 @media (max-width: 620px) {
   .reader:has(.epub-progress) { padding-block-end: 48px; }

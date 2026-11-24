@@ -7,7 +7,23 @@ import {setupSync, showPairingScreen, syncBook, isPaired, readCatalog, uploadBoo
 import './style.css';
 pdfjs.GlobalWorkerOptions.workerSrc=workerUrl;
 const app=document.querySelector('#app');
-const state={books:[],book:null,epub:null,rendition:null,pdf:null,page:1,zoom:1.2,font:105,night:false,token:0};
+const state={books:[],book:null,epub:null,rendition:null,pdf:null,page:1,zoom:1.2,font:105,theme:'day',token:0};
+const readingThemes = {
+  day: ['#fffdf7', '#302c28'],
+  sepia: ['#f1e2c5', '#392d22'],
+  night: ['#20252b', '#f0eeee'],
+  console: ['#171c18', '#b6e3ab'],
+};
+const savedTheme = localStorage.getItem('reader-theme');
+if (Object.hasOwn(readingThemes, savedTheme)) state.theme = savedTheme;
+function setTheme(theme) {
+  if (!Object.hasOwn(readingThemes, theme)) return;
+  state.theme = theme;
+  localStorage.setItem('reader-theme', theme);
+  app.querySelector('.stage').dataset.theme = theme;
+  state.rendition.themes.select("mp-display-" + theme);
+}
+const fontAt = steps => Math.max(70, Math.min(200, state.font + steps * 10));
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function message(t){const m=document.querySelector('#notice');if(m){m.textContent=t;m.hidden=false;setTimeout(()=>{if(m.textContent===t)m.hidden=true},4000);}else alert(t);}
 let libraryRequest = 0;
@@ -210,15 +226,15 @@ async function getReaderLanguage(epub) {
 }
 
 function shell(book, language = 'he'){const labels = readerLabels[language];app.innerHTML=`<div class="reader ${book.type === 'epub' ? 'reading-clean' : ''}" lang="${language}" dir="${language === 'en' ? 'ltr' : 'rtl'}"><header class="reading-top"><button id="back">${labels.back}</button><strong dir="auto">${esc(book.title)}</strong><button id="toc" ${book.type==='pdf'?'hidden':''}>${labels.toc}</button></header>
-<div class="stage ${state.night?'night':''}"><div id="viewport" class="viewport">${labels.loading}</div></div>
-<footer class="controls" ${book.type === 'epub' ? 'aria-describedby="position"' : ''}><div class="nav"><button id="prev" aria-label="${labels.previous}">${labels.previous}</button>${book.type === 'epub' ? '' : '<span id="position">—</span>'}<button id="next" aria-label="${labels.next}">${labels.next}</button></div><div class="settings"><div class="appearance-controls"><button id="smaller" ${book.type === 'epub' ? `aria-label="${labels.smaller}"` : ''}>−</button><span id="size-label"></span><button id="larger" ${book.type === 'epub' ? `aria-label="${labels.larger}"` : ''}>＋</button><button id="theme" aria-label="${labels.theme}" ${book.type==='pdf'?'hidden':''}>◐</button></div></div>${book.type === 'epub' ? `<div id="position" class="epub-progress"><span class="progress-summary" dir="ltr">—</span></div>` : ''}</footer>
+<div class="stage" data-theme="${book.type === 'epub' ? state.theme : 'day'}"><div id="viewport" class="viewport">${labels.loading}</div></div>
+<footer class="controls" ${book.type === 'epub' ? 'aria-describedby="position"' : ''}><div class="nav"><button id="prev" aria-label="${labels.previous}">${labels.previous}</button>${book.type === 'epub' ? '' : '<span id="position">—</span>'}<button id="next" aria-label="${labels.next}">${labels.next}</button></div><div class="settings"><div class="appearance-controls"><button id="smaller" ${book.type === 'epub' ? `aria-label="${labels.smaller}"` : ''}>−</button><span id="size-label"></span><button id="larger" ${book.type === 'epub' ? `aria-label="${labels.larger}"` : ''}>＋</button></div></div>${book.type === 'epub' ? `<div id="position" class="epub-progress"><span class="progress-summary" dir="ltr">—</span></div>` : ''}</footer>
 <aside class="toc-panel" id="toc-panel" hidden><button id="close-toc">${labels.close}</button><h3>${labels.toc}</h3><div id="toc-list"></div></aside>
 </div><div id="notice" class="notice" hidden></div>`;
 app.querySelector('#back').onclick=closeBook;
 app.querySelector('#prev').onclick=()=>navigate(-1);app.querySelector('#next').onclick=()=>navigate(1);
 app.querySelector('#smaller').onclick=()=>changeSize(-1);app.querySelector('#larger').onclick=()=>changeSize(1);
 app.querySelector('#size-label').textContent=book.type==='pdf'?Math.round(state.zoom*100)+'%':state.font+'%';
-if(book.type==='epub'){app.querySelector('#theme').onclick=()=>{state.night=!state.night;app.querySelector('.stage').classList.toggle('night',state.night);state.rendition?.themes.select(state.night?'night':'paper');};app.querySelector('#toc').onclick=()=>app.querySelector('#toc-panel').hidden=false;app.querySelector('#close-toc').onclick=()=>app.querySelector('#toc-panel').hidden=true;}
+if(book.type==='epub'){app.querySelector('#toc').onclick=()=>app.querySelector('#toc-panel').hidden=false;app.querySelector('#close-toc').onclick=()=>app.querySelector('#toc-panel').hidden=true;}
 }
 async function openBook(id){if (!isPaired()) return;await destroy();const book=await getBook(id);if(!book)return;state.book=book;const token=++state.token;let labels=readerLabels.he;shell(book);try{await syncBook(book, saveBook).catch(console.error);if(state.token!==token)return;if(book.type==='pdf'){const buffer=await book.file.arrayBuffer();state.pdf=await pdfjs.getDocument({data:new Uint8Array(buffer)}).promise;if(state.token!==token)return;state.page=Math.max(1,Math.min(state.pdf.numPages,Number(book.location)||1));await drawPdf();}else{const data=await book.file.arrayBuffer();state.epub=ePub(data);await state.epub.ready;if(state.token!==token)return;
 const language = await getReaderLanguage(state.epub);
@@ -231,11 +247,16 @@ const direction = state.epub.packaging?.metadata?.direction === 'rtl' ||
   (!state.epub.packaging?.metadata?.direction && language === 'he') ? 'rtl' : 'ltr';
 setReaderLayout(app.querySelector('.stage'), {...defaultLayout, ...book.layout});
 state.rendition = state.epub.renderTo(view, {width:'100%', height:'100%', flow:'paginated',
-  spread:'none', defaultDirection:direction});state.rendition.themes.register('paper',{body:{background:'#fffdf7 !important',color:'#302c28 !important'}});state.rendition.themes.register('night',{body:{background:'#20252b !important',color:'#f0eeee !important'}});state.rendition.themes.select(state.night?'night':'paper');state.rendition.themes.fontSize(state.font+'%');const progress = trackEpubProgress(state.epub, state.rendition, book, labels, token);
+  spread:'none', defaultDirection:direction});for (const [name, [background, color]] of Object.entries(readingThemes)) {
+  const className = 'mp-display-' + name;
+  state.rendition.themes.register(className, {['body.' + className]: {background: background + ' !important', color: color + ' !important'}});
+}
+state.rendition.themes.select("mp-display-" + state.theme);
+state.rendition.themes.fontSize(state.font+'%');const progress = trackEpubProgress(state.epub, state.rendition, book, labels, token);
 state.epubProgress = progress;
 state.readerTools = new AbortController();
 const tools = attachReaderTools({root: app, book, rendition: state.rendition, language,
-  direction: state.epub.packaging?.metadata?.direction || direction, progress, navigate, changeSize,
+  direction: state.epub.packaging?.metadata?.direction || direction, progress, navigate, changeSize, fontAt, theme: state.theme, setTheme,
   persist: () => saveReadingState(book), signal: state.readerTools.signal});
 const displayed = state.rendition.display(book.location || undefined);
 progress.indexed = displayed.then(() => {
@@ -366,7 +387,7 @@ async function navigate(n) {
   }
 }
 async function changeSize(n){if(state.pdf){state.zoom=Math.max(.5,Math.min(3,state.zoom+n*.2));app.querySelector('#size-label').textContent=Math.round(state.zoom*100)+'%';await drawPdf();}else if (state.epubProgress && !state.epubProgress.resizing) {
-  const font = Math.max(70, Math.min(200, state.font + n * 10));
+  const font = fontAt(n);
   if (font === state.font) return;
   state.font = font;
   app.querySelector('#size-label').textContent = font + '%';
