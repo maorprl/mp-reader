@@ -170,6 +170,8 @@ export function attachReaderTools({root, book, rendition, language, direction, p
   const appearance = settings.querySelector('.appearance-controls');
   const footer = root.querySelector('.controls');
   const nav = footer.querySelector('.nav');
+  const previous = nav.querySelector('#prev');
+  const next = nav.querySelector('#next');
   const footerProgress = footer.querySelector('.epub-progress');
   for (const side of ['left', 'right']) {
     const rail = document.createElement('button');
@@ -184,10 +186,10 @@ export function attachReaderTools({root, book, rendition, language, direction, p
   function arrangeAppearance() {
     if (compact.matches) {
       query('[data-appearance]').append(appearance);
-      footerProgress.prepend(nav);
-      footerProgress.append(toolsButton);
+      footerProgress.prepend(previous);
+      footerProgress.append(toolsButton, next);
     } else {
-      footer.prepend(nav);
+      nav.append(previous, next);
       settings.prepend(appearance);
       settings.append(toolsButton);
     }

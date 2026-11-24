@@ -236,11 +236,11 @@
 @media (max-width: 620px) {
   .reader:has(.epub-progress) { padding-block-end: 48px; }
   .epub-progress {
-    display: flex;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
     align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding-inline: 10px;
+    gap: 4px;
+    padding-inline: 8px;
   }
   .epub-progress .open-reader-tools {
     min-height: 44px;
@@ -252,8 +252,8 @@
 .page-tap-rail { display: none; }
 
 @media (max-width: 620px) {
-  .epub-progress .nav { padding: 0; gap: 4px; }
-  .epub-progress .nav button { min-height: 44px; padding-inline: 6px; }
+  .epub-progress > :is(#prev, #next) { min-height: 44px; padding-inline: 6px; }
+  .epub-progress .progress-summary { justify-content: center; }
   .epub-progress .progress-summary { font-size: 12px; }
   .epub-progress .open-reader-tools { padding-inline: 6px; }
   .page-tap-rail {
