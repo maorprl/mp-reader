@@ -309,6 +309,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       if (pinch || !event.isPrimary || event.button !== 0) return;
       press = {
         id: event.pointerId,
+        type: event.pointerType,
         x: event.clientX,
         y: event.clientY,
         start: event.timeStamp,
@@ -316,12 +317,13 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       };
     }, options);
     target.addEventListener('pointercancel', () => { press = null; }, options);
-    target.addEventListener('click', async event => {
+    async function activateTap(event) {
+      if (event.type === 'click' && press?.type === 'touch') return;
       const start = press;
       press = null;
-      if (!start || (event.pointerId > 0 && event.pointerId !== start.id) || event.detail !== 1 ||
-          event.timeStamp - start.start > 350 ||
-          Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10 ||
+      if (!start || (event.pointerId > 0 && event.pointerId !== start.id) || (event.type === 'click' && event.detail !== 1) ||
+          event.timeStamp - start.start > 450 ||
+          Math.hypot(event.clientX - start.x, event.clientY - start.y) > 18 ||
           event.defaultPrevented || navigating || progress.resizing || signal.aborted ||
           event.target?.closest?.('a, button, input, textarea, select, label, video, audio, [contenteditable], .reader-highlight, .highlight-confirmation')) return;
       if (contents?.window.getSelection()?.toString()) return;
@@ -334,13 +336,14 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       const {left, width} = viewport.getBoundingClientRect();
       if (!width) return;
       const position = (x - left) / width;
-      if (position > 0.3 && position < 0.7) {
-        if (compact.matches && position >= 0.45 && position <= 0.55) {
+      const edge = compact.matches ? 0.45 : 0.3;
+      if (position > edge && position < 1 - edge) {
+        if (compact.matches) {
           reader.classList.toggle('reading-clean');
         }
         return;
       }
-      const forward = (position <= 0.3) === (direction === 'rtl');
+      const forward = (position <= edge) === (direction === 'rtl');
       navigating = true;
       try {
         await navigate(forward ? 1 : -1);
@@ -349,7 +352,11 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       } finally {
         navigating = false;
       }
+    }
+    target.addEventListener('pointerup', event => {
+      if (event.pointerType === 'touch') activateTap(event);
     }, options);
+    target.addEventListener('click', activateTap, options);
   }
 
   bindPageTaps(stage, null, {signal});

@@ -7,7 +7,7 @@ import {setupSync, showPairingScreen, syncBook, isPaired, readCatalog, uploadBoo
 import './style.css';
 pdfjs.GlobalWorkerOptions.workerSrc=workerUrl;
 const app=document.querySelector('#app');
-const state={books:[],book:null,epub:null,rendition:null,pdf:null,page:1,zoom:1.2,font:105,theme:'day',token:0};
+const state={books:[],book:null,epub:null,rendition:null,pdf:null,page:1,zoom:1.2,font:150,theme:'day',token:0};
 const readingThemes = {
   day: ['#fffdf7', '#302c28'],
   sepia: ['#f1e2c5', '#392d22'],
@@ -23,7 +23,7 @@ function setTheme(theme) {
   app.querySelector('.stage').dataset.theme = theme;
   state.rendition.themes.select("mp-display-" + theme);
 }
-const fontAt = steps => Math.max(70, Math.min(200, state.font + steps * 10));
+const fontAt = steps => Math.max(70, Math.min(200, state.font + steps * 5));
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function message(t){const m=document.querySelector('#notice');if(m){m.textContent=t;m.hidden=false;setTimeout(()=>{if(m.textContent===t)m.hidden=true},4000);}else alert(t);}
 let libraryRequest = 0;
