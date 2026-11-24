@@ -168,11 +168,26 @@ export function attachReaderTools({root, book, rendition, language, direction, p
   const query = selector => panel.querySelector(selector);
   const settings = root.querySelector('.settings');
   const appearance = settings.querySelector('.appearance-controls');
+  const footer = root.querySelector('.controls');
+  const nav = footer.querySelector('.nav');
+  const footerProgress = footer.querySelector('.epub-progress');
+  for (const side of ['left', 'right']) {
+    const rail = document.createElement('button');
+    const forward = (side === 'left') === (direction === 'rtl');
+    rail.type = 'button';
+    rail.className = 'page-tap-rail page-tap-rail-' + side;
+    rail.setAttribute('aria-label', root.querySelector(forward ? '#next' : '#prev').getAttribute('aria-label'));
+    rail.tabIndex = -1;
+    rail.onclick = () => navigate(forward ? 1 : -1).catch(report);
+    stage.append(rail);
+  }
   function arrangeAppearance() {
     if (compact.matches) {
       query('[data-appearance]').append(appearance);
-      root.querySelector('.epub-progress').append(toolsButton);
+      footerProgress.prepend(nav);
+      footerProgress.append(toolsButton);
     } else {
+      footer.prepend(nav);
       settings.prepend(appearance);
       settings.append(toolsButton);
     }

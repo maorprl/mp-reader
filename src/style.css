@@ -249,8 +249,25 @@
   .reader-tools { bottom: 48px; }
 }
 
+.page-tap-rail { display: none; }
+
 @media (max-width: 620px) {
-  .reading-clean .controls:has(.epub-progress) > .nav { display: flex; }
-  .reader:has(.epub-progress) { padding-block-end: 90px; }
-  .reader-tools { bottom: 90px; }
+  .epub-progress .nav { padding: 0; gap: 4px; }
+  .epub-progress .nav button { min-height: 44px; padding-inline: 6px; }
+  .epub-progress .progress-summary { font-size: 12px; }
+  .epub-progress .open-reader-tools { padding-inline: 6px; }
+  .page-tap-rail {
+    display: block;
+    position: absolute;
+    top: 12%;
+    bottom: 10%;
+    width: min(28px, 8%);
+    padding: 0;
+    border: 0;
+    background: transparent;
+    z-index: 2;
+    touch-action: manipulation;
+  }
+  .page-tap-rail-left { left: 0; }
+  .page-tap-rail-right { right: 0; }
 }
