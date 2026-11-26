@@ -8,7 +8,7 @@ const translations = {
     appearance: 'גופן ותצוגה', theme: 'מצב צבע', brightness: 'בהירות העמוד', system: 'אפס עמעום', themes: ['יום', 'ספיה', 'לילה', 'קונסול'], layout: 'פריסת הקריאה', width: 'רוחב', spacing: 'ריווח שורות', margins: 'שוליים מהצדדים',
     apply: 'החל', reset: 'ברירת מחדל', highlights: 'הדגשות והערות',
     select: 'בחר טקסט בספר כדי להדגיש אותו או להוסיף הערה.', note: 'הערה',
-    save: 'שמור הדגשה', cancel: 'בטל', edit: 'ערוך הערה', update: 'שמור הערה', remove: 'הסר',
+    proceed: 'המשך בעמוד הבא', continueHint: 'בחר את המשך הטקסט בעמוד הזה.', save: 'שמור הדגשה', cancel: 'בטל', edit: 'ערוך הערה', update: 'שמור הערה', remove: 'הסר',
     passage: 'עבור לקטע', location: percent => 'מיקום בספר: ' + percent + '%',
     noItems: 'אין פריטים שמורים.', error: 'הפעולה נכשלה. אפשר לנסות שוב.',
   },
@@ -19,7 +19,7 @@ const translations = {
     appearance: 'Font and display', theme: 'Color mode', brightness: 'Page brightness', system: 'Reset dimming', themes: ['Day', 'Sepia', 'Night', 'Console'], layout: 'Reading layout', width: 'Width', spacing: 'Line spacing', margins: 'Side margins',
     apply: 'Apply', reset: 'Reset', highlights: 'Highlights and notes',
     select: 'Select text in the book to highlight it or add a note.', note: 'Note',
-    save: 'Save highlight', cancel: 'Cancel', edit: 'Edit note', update: 'Save note', remove: 'Remove',
+    proceed: 'Continue on next page', continueHint: 'Select the rest of the text on this page.', save: 'Save highlight', cancel: 'Cancel', edit: 'Edit note', update: 'Save note', remove: 'Remove',
     passage: 'Go to passage', location: percent => 'Book position: ' + percent + '%',
     noItems: 'No saved items.', error: 'Something went wrong. Please try again.',
   },
@@ -236,15 +236,18 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     ? Math.sign(ratio - 1) * Math.max(1, Math.round(Math.abs(ratio - 1) * 10)) : 0;
   let selected;
   let draft;
+  let fragments = [];
   const confirmation = document.createElement('div');
   confirmation.className = 'highlight-confirmation';
   confirmation.hidden = true;
   confirmation.innerHTML = `<button type="button" data-confirm>${t.save}</button>
+    <button type="button" data-continue>${t.proceed}</button>
     <button type="button" data-cancel>${t.cancel}</button><span role="status"></span>`;
   stage.append(confirmation);
 
   function clearDraft() {
     draft = null;
+    fragments = [];
     confirmation.hidden = true;
     confirmation.querySelector('span').textContent = '';
   }
@@ -396,7 +399,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
   }
 
   bindPageTaps(stage, null, {signal});
-  rendition.on('relocated', clearDraft);
+  rendition.on('relocated', () => { if (!fragments.length) clearDraft(); });
   window.addEventListener('keydown', handleKeys, {signal});
   rendition.on('keydown', handleKeys);
   rendition.hooks.content.register(contents => {
@@ -571,8 +574,10 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       }
       item.append(listButton(t.passage, () => jump(target)),
         listButton(t.edit, () => openHighlightEditor(entry)), listButton(t.remove, async () => {
-        rendition.annotations.remove(entry.cfi, 'highlight');
-        painted.delete(entry.cfi);
+        for (const cfi of rangesOf(entry)) {
+          rendition.annotations.remove(cfi, 'highlight');
+          painted.delete(cfi);
+        }
         highlights.splice(index, 1);
         if (selected === entry) {
           selected = null;
@@ -583,11 +588,18 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       }));
     });
   }
+  const rangesOf = entry => [entry.cfi, ...(entry.additionalRanges ?? [])];
   function paint(entry) {
-    painted.add(entry.cfi);
-    rendition.annotations.highlight(entry.cfi, {}, () => openHighlightEditor(entry), 'reader-highlight', {
-      fill: '#ffd548', 'fill-opacity': '0.38', 'mix-blend-mode': 'normal',
-    });
+    for (const cfi of rangesOf(entry)) {
+      if (painted.has(cfi)) continue;
+      painted.add(cfi);
+      rendition.annotations.highlight(cfi, {}, () => {
+        const current = highlights.find(item => rangesOf(item).includes(cfi));
+        if (current) openHighlightEditor(current);
+      }, 'reader-highlight', {
+        fill: '#ffd548', 'fill-opacity': '0.38', 'mix-blend-mode': 'normal',
+      });
+    }
   }
   rendition.on('selected', (_cfi, contents) => {
     if (signal.aborted || progress.resizing) return;
@@ -597,20 +609,50 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     // Read the live selection in case the user moved a handle before the event arrived.
     draft = {cfi: contents.cfiFromRange(selection.getRangeAt(0)), text, contents};
     confirmation.hidden = false;
+    confirmation.querySelector('span').textContent = '';
   });
   confirmation.querySelector('[data-cancel]').onclick = () => {
     draft?.contents.window.getSelection()?.removeAllRanges();
     clearDraft();
   };
   const confirm = confirmation.querySelector('[data-confirm]');
-  confirm.onclick = async () => {
-    if (!draft || confirm.disabled) return;
-    const {contents, ...entry} = draft;
-    if (highlights.some(highlight => highlight.cfi === entry.cfi)) {
+  const cancel = confirmation.querySelector('[data-cancel]');
+  const proceed = confirmation.querySelector('[data-continue]');
+  proceed.onclick = async () => {
+    if (confirm.disabled || (!draft && !fragments.length)) return;
+    const current = rendition.currentLocation()?.start;
+    if (current?.displayed?.page >= current?.displayed?.total &&
+        !rendition.book.spine.get(current.index)?.next()) return;
+    if (draft) {
+      const {contents, cfi, text} = draft;
+      if (!fragments.some(part => part.cfi === cfi)) fragments.push({cfi, text});
+      draft = null;
       contents.window.getSelection()?.removeAllRanges();
+    }
+    confirm.disabled = cancel.disabled = proceed.disabled = true;
+    try {
+      await navigate(1);
+      confirmation.querySelector('span').textContent = t.continueHint;
+    } catch (error) {
+      report(error);
+    } finally {
+      confirm.disabled = cancel.disabled = proceed.disabled = false;
+    }
+  };
+  confirm.onclick = async () => {
+    if ((!draft && !fragments.length) || confirm.disabled) return;
+    const selection = draft;
+    const parts = [...fragments];
+    if (selection && !parts.some(part => part.cfi === selection.cfi)) parts.push(selection);
+    const used = new Set(highlights.flatMap(rangesOf));
+    const newParts = parts.filter(part => !used.has(part.cfi));
+    if (!newParts.length) {
+      selection?.contents.window.getSelection()?.removeAllRanges();
       clearDraft();
       return;
     }
+    const entry = {cfi: newParts[0].cfi, text: newParts.map(part => part.text).join(' ')};
+    if (newParts.length > 1) entry.additionalRanges = newParts.slice(1).map(part => part.cfi);
     confirm.disabled = true;
     highlights.push(entry);
     try {
@@ -618,8 +660,8 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       if (signal.aborted) return;
       paint(entry);
       showHighlights();
-      if (draft?.cfi === entry.cfi) {
-        contents.window.getSelection()?.removeAllRanges();
+      if (draft === selection) {
+        selection?.contents.window.getSelection()?.removeAllRanges();
         clearDraft();
       }
     } catch (error) {
@@ -640,18 +682,18 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     showHighlights();
     await persist().catch(report);
   };
-  let painted = new Set(highlights.map(entry => entry.cfi));
+  let painted = new Set();
   highlights.forEach(paint);
   showHighlights();
   return {
-    canRefresh: () => !selected && !draft,
+    canRefresh: () => !selected && !draft && !fragments.length,
     refresh() {
-      const current = new Set(highlights.map(entry => entry.cfi));
+      const current = new Set(highlights.flatMap(rangesOf));
       for (const cfi of painted) {
         if (!current.has(cfi)) rendition.annotations.remove(cfi, 'highlight');
       }
       for (const entry of highlights) {
-        if (!painted.has(entry.cfi)) paint(entry);
+        paint(entry);
       }
       painted = current;
       showBookmarks();
