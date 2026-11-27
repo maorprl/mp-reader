@@ -1,3 +1,4 @@
+import {readerVersion} from './version.js';
 import ePub from 'epubjs';
 import {createReaderSelection} from './reader-selection.js';
 
@@ -114,6 +115,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
   panel.hidden = true;
   panel.innerHTML = `
     <button type="button" data-close>${t.close}</button>
+    <small class="reader-version" dir="ltr">v${readerVersion}</small>
     <details data-search>
       <summary>${t.search}</summary>
       <form data-search-form>
@@ -231,7 +233,6 @@ export function attachReaderTools({root, book, rendition, language, direction, p
   let selected;
   let draft;
   const mouseSelecting = new WeakSet();
-  const touchSelecting = new WeakSet();
   const confirmation = document.createElement('div');
   confirmation.className = 'highlight-confirmation';
   confirmation.hidden = true;
@@ -297,70 +298,12 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     let navigating = false;
     let pinch;
     let touchPress;
-    let holdTimer;
-    function cancelHold() {
-      clearTimeout(holdTimer);
-      holdTimer = undefined;
-    }
-    signal.addEventListener('abort', cancelHold, {once: true});
-    function startTouchSelection(point) {
-      if (!contents?.document || progress.resizing || selection?.active) return;
-      const doc = contents.document;
-      // Hit testing needs selectable text even though native touch selection is disabled.
-      doc.documentElement.classList.remove('reader-touch-input');
-      let caret;
-      try {
-        const position = doc.caretPositionFromPoint?.(point.clientX, point.clientY);
-        if (position) {
-          caret = doc.createRange();
-          caret.setStart(position.offsetNode, position.offset);
-          caret.collapse(true);
-        } else {
-          caret = doc.caretRangeFromPoint?.(point.clientX, point.clientY);
-        }
-      } finally {
-        doc.documentElement.classList.add('reader-touch-input');
-      }
-      const node = caret?.startContainer;
-      if (node?.nodeType !== Node.TEXT_NODE || !node.length) return;
-      // A caret at a word boundary may point to the space after the tapped letter.
-      const words = Intl.Segmenter
-        ? new Intl.Segmenter(language, {granularity: 'word'}).segment(node.data)
-        : null;
-      for (const offset of [caret.startOffset, caret.startOffset - 1]) {
-        if (offset < 0 || offset >= node.length) continue;
-        const word = words ? words.containing(offset) : Array.from(node.data.matchAll(/[^\s]+/g), match => ({
-          index: match.index, segment: match[0], isWordLike: true,
-        })).find(match => match.index <= offset && offset < match.index + match.segment.length);
-        if (!word?.isWordLike) continue;
-        const range = doc.createRange();
-        range.setStart(node, word.index);
-        range.setEnd(node, word.index + word.segment.length);
-        if (!Array.from(range.getClientRects()).some(rect =>
-          point.clientX >= rect.left && point.clientX <= rect.right &&
-          point.clientY >= rect.top && point.clientY <= rect.bottom)) continue;
-        draft = null;
-        selection.start(contents, range);
-        touchPress = null;
-        return;
-      }
-    }
     const distance = touches => Math.hypot(
       touches[0].clientX - touches[1].clientX,
       touches[0].clientY - touches[1].clientY,
     );
-    if (contents && selection) {
-      target.addEventListener('contextmenu', event => {
-        if (touchPress || event.pointerType === 'touch') event.preventDefault();
-      }, true);
-    }
     target.addEventListener('touchstart', event => {
-      cancelHold();
       touchPress = null;
-      if (contents && selection) {
-        touchSelecting.add(contents);
-        contents.document.documentElement.classList.add('reader-touch-input');
-      }
       if (event.touches.length === 1 && !pinch) {
         const point = event.touches[0];
         touchPress = {
@@ -369,10 +312,6 @@ export function attachReaderTools({root, book, rendition, language, direction, p
           start: event.timeStamp, target: event.target,
           hadSelection: Boolean(draft || selection?.active || contents?.window.getSelection()?.toString()),
         };
-        if (contents && selection && !touchPress.hadSelection &&
-            !event.target.closest?.('a, button, input, textarea, select, label, video, audio, [contenteditable]')) {
-          holdTimer = setTimeout(() => startTouchSelection(point), 550);
-        }
         return;
       }
       if (event.touches.length !== 2 || (!contents && !viewport.contains(event.target)) ||
@@ -388,7 +327,6 @@ export function attachReaderTools({root, book, rendition, language, direction, p
         // The iframe moves as we scroll. Screen coordinates stay fixed relative to the finger.
         const dx = point.screenX - touchPress.screenX;
         const dy = point.screenY - touchPress.screenY;
-        if (Math.hypot(dx, dy) > 8) cancelHold();
         if (progress.continuous && contents && !progress.resizing &&
             !contents.window.getSelection()?.toString() &&
             (touchPress.scrolling || (Math.abs(dy) > 9 && Math.abs(dy) > Math.abs(dx)))) {
@@ -409,7 +347,6 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       showFont(pinchSteps(pinch.ratio));
     }, {...options, passive: false});
     target.addEventListener('touchend', event => {
-      cancelHold();
       if (!pinch) {
         const start = touchPress;
         touchPress = null;
@@ -428,7 +365,6 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       zoomTimeout = setTimeout(() => { zoomStatus.hidden = true; }, 900);
     }, {...options, passive: false});
     target.addEventListener('touchcancel', () => {
-      cancelHold();
       if (pinch) zoomStatus.hidden = true;
       pinch = null;
       press = null;
@@ -491,8 +427,6 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     if (progress.continuous) {
       contents.document.addEventListener('pointerdown', event => {
         if (event.pointerType === 'touch' || event.button !== 0) return;
-        touchSelecting.delete(contents);
-        contents.document.documentElement.classList.remove('reader-touch-input');
         mouseSelecting.add(contents);
       });
       const finishMouseSelection = () => {
@@ -504,13 +438,6 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       contents.document.addEventListener('pointermove', event => {
         if (event.pointerType === 'mouse' && !(event.buttons & 1)) finishMouseSelection();
       });
-      contents.addStylesheetRules({
-        'html.reader-touch-input body': {
-          '-webkit-user-select': 'none',
-          'user-select': 'none',
-          '-webkit-touch-callout': 'none',
-        },
-      }, 'reader-touch-selection');
     }
     contents.addStylesheetRules({html: {'touch-action': progress.continuous ? 'none' : 'pan-x pan-y'}});
     if (progress.continuous && language === 'en') {
@@ -732,7 +659,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     }
   }
   function captureSelection(contents) {
-    if (signal.aborted || progress.resizing || mouseSelecting.has(contents) || touchSelecting.has(contents)) return;
+    if (signal.aborted || progress.resizing || mouseSelecting.has(contents)) return;
     const selectionInBook = contents.window?.getSelection();
     const text = selectionInBook?.toString().trim();
     if (!text || !selectionInBook.rangeCount) return;
@@ -749,7 +676,13 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     confirm.disabled = cancel.disabled = true;
     let entry;
     try {
-      const parts = draft ? [draft] : await selection.parts();
+      const current = draft?.contents.window?.getSelection();
+      const text = current?.toString().trim();
+      const parts = draft
+        ? [text && current.rangeCount
+          ? {cfi: draft.contents.cfiFromRange(current.getRangeAt(0)), text}
+          : draft]
+        : await selection.parts();
       if (signal.aborted) return;
       const used = new Set(highlights.flatMap(rangesOf));
       const newParts = parts.filter(part => !used.has(part.cfi));

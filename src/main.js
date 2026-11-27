@@ -1,3 +1,4 @@
+import {readerVersion} from './version.js';
 import ePub from 'epubjs';
 import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -104,7 +105,7 @@ async function shareLibrary(button) {
 }
 
 function library(){document.title='mp-reader · הספרייה';app.innerHTML=`
-<header class="top"><div class="brand">📖 mp-reader</div><button id="sync-devices" type="button">סנכרון מכשירים</button></header>
+<header class="top"><div class="brand">📖 mp-reader <small class="reader-version" dir="ltr">v${readerVersion}</small></div><button id="sync-devices" type="button">סנכרון מכשירים</button></header>
 <main class="library"><div class="hero"><h1>הספרייה שלי</h1></div>
 <div class="actions">${isPaired() ? '<button type="button" id="share-library">סנכרן ספרים</button>' : ''}<h2>הספרים שלי <small>(${state.books.length})</small></h2><label class="primary">＋ הוספת ספרים<input id="pick" type="file" accept=".epub,.pdf" multiple hidden></label></div>
 <div class="grid">${state.books.map(b=>`<article class="tile"><button class="cover" data-open="${esc(b.id)}"><span class="cover-icon">${b.type==='pdf'?'PDF':'EPUB'}</span><strong>${esc(b.title)}</strong></button><div class="tile-foot"><button class="book-name" data-open="${esc(b.id)}">${esc(b.title)}</button><small>${esc(b.progress||'טרם נקרא')}</small>${b.remote ? '' : `<button class="delete" data-delete="${esc(b.id)}" aria-label="מחק עותק מקומי">🗑</button>`}</div></article>`).join('')}</div>
