@@ -213,10 +213,7 @@ export function createReaderSelection({stage, viewport, rendition, progress, sig
     schedule();
     scheduleEdges();
   });
-  rendition.on('relocated', () => {
-    schedule();
-    scheduleEdges();
-  });
+  rendition.on('relocated', schedule);
   signal.addEventListener('abort', () => {
     cancelAnimationFrame(frame);
     clearTimeout(edgeTimer);

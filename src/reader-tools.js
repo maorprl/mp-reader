@@ -323,21 +323,27 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       }
       const node = caret?.startContainer;
       if (node?.nodeType !== Node.TEXT_NODE || !node.length) return;
-      const offset = Math.min(caret.startOffset, node.length - 1);
-      const word = Intl.Segmenter
-        ? new Intl.Segmenter(language, {granularity: 'word'}).segment(node.data).containing(offset)
-        : [...node.data.matchAll(/[^\s]+/g)].map(match => ({
+      // A caret at a word boundary may point to the space after the tapped letter.
+      const words = Intl.Segmenter
+        ? new Intl.Segmenter(language, {granularity: 'word'}).segment(node.data)
+        : null;
+      for (const offset of [caret.startOffset, caret.startOffset - 1]) {
+        if (offset < 0 || offset >= node.length) continue;
+        const word = words ? words.containing(offset) : Array.from(node.data.matchAll(/[^\s]+/g), match => ({
           index: match.index, segment: match[0], isWordLike: true,
         })).find(match => match.index <= offset && offset < match.index + match.segment.length);
-      if (!word?.isWordLike) return;
-      caret.setStart(node, word.index);
-      caret.setEnd(node, word.index + word.segment.length);
-      const rect = caret.getBoundingClientRect();
-      if (point.clientX < rect.left || point.clientX > rect.right ||
-          point.clientY < rect.top || point.clientY > rect.bottom) return;
-      draft = null;
-      selection.start(contents, caret);
-      touchPress = null;
+        if (!word?.isWordLike) continue;
+        const range = doc.createRange();
+        range.setStart(node, word.index);
+        range.setEnd(node, word.index + word.segment.length);
+        if (!Array.from(range.getClientRects()).some(rect =>
+          point.clientX >= rect.left && point.clientX <= rect.right &&
+          point.clientY >= rect.top && point.clientY <= rect.bottom)) continue;
+        draft = null;
+        selection.start(contents, range);
+        touchPress = null;
+        return;
+      }
     }
     const distance = touches => Math.hypot(
       touches[0].clientX - touches[1].clientX,
@@ -359,6 +365,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
         const point = event.touches[0];
         touchPress = {
           id: point.identifier, x: point.clientX, y: point.clientY,
+          screenX: point.screenX, screenY: point.screenY,
           start: event.timeStamp, target: event.target,
           hadSelection: Boolean(draft || selection?.active || contents?.window.getSelection()?.toString()),
         };
@@ -378,8 +385,9 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     target.addEventListener('touchmove', event => {
       if (touchPress && event.touches.length === 1) {
         const point = event.touches[0];
-        const dx = point.clientX - touchPress.x;
-        const dy = point.clientY - touchPress.y;
+        // The iframe moves as we scroll. Screen coordinates stay fixed relative to the finger.
+        const dx = point.screenX - touchPress.screenX;
+        const dy = point.screenY - touchPress.screenY;
         if (Math.hypot(dx, dy) > 8) cancelHold();
         if (progress.continuous && contents && !progress.resizing &&
             !contents.window.getSelection()?.toString() &&
@@ -387,10 +395,10 @@ export function attachReaderTools({root, book, rendition, language, direction, p
           if (event.cancelable) event.preventDefault();
           const scroller = rendition.manager.container;
           const top = scroller.scrollTop;
-          scroller.scrollTop += (touchPress.lastY ?? touchPress.y) - point.clientY;
+          scroller.scrollTop += (touchPress.lastY ?? touchPress.screenY) - point.screenY;
           if (scroller.scrollTop !== top) progress.followScroll = true;
           touchPress.scrolling = true;
-          touchPress.lastY = point.clientY;
+          touchPress.lastY = point.screenY;
         } else if (Math.hypot(dx, dy) > 18) {
           touchPress = null;
         }
