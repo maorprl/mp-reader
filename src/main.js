@@ -392,7 +392,16 @@ async function navigate(n) {
   const {rendition, epub, epubProgress: progress} = state;
   if (!rendition || !progress || progress.resizing || progress.navigating) return;
 
-  const current = progress.continuous ? null : rendition.currentLocation()?.start;
+  if (progress.continuous) {
+    const scroller = rendition.manager.container;
+    if (!scroller?.clientHeight) return;
+    const start = scroller.scrollTop;
+    scroller.scrollTop = start + n * scroller.clientHeight;
+    if (scroller.scrollTop !== start) progress.followScroll = true;
+    return;
+  }
+
+  const current = rendition.currentLocation()?.start;
   let nextSection;
   // In RTL the renderer can try to scroll past the last column of a section.
   if (n > 0 && current?.displayed?.total > 0 && current.displayed.page >= current.displayed.total) {
