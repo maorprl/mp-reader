@@ -105,11 +105,19 @@ async function shareLibrary(button) {
   }
 }
 
+function libraryProgress(book) {
+  if (book.remote) return book.progress;
+  if (book.readingPercent?.location === book.location && Number.isFinite(book.readingPercent?.value)) {
+    return 'התקדמות: ' + book.readingPercent.value + '%';
+  }
+  return book.location ? 'בקריאה' : 'טרם נקרא';
+}
+
 function library(){document.title='mp-reader · הספרייה';app.innerHTML=`
 <header class="top"><div class="brand">📖 mp-reader <small class="reader-version" dir="ltr">v${readerVersion}</small></div><button id="sync-devices" type="button">סנכרון מכשירים</button></header>
 <main class="library"><div class="hero"><h1>הספרייה שלי</h1></div>
 <div class="actions">${isPaired() ? '<button type="button" id="share-library">סנכרן ספרים</button>' : ''}<h2>הספרים שלי <small>(${state.books.length})</small></h2><label class="primary">＋ הוספת ספרים<input id="pick" type="file" accept=".epub,.pdf" multiple hidden></label></div>
-<div class="grid">${state.books.map(b=>`<article class="tile"><button class="cover" data-open="${esc(b.id)}"><span class="cover-icon">${b.type==='pdf'?'PDF':'EPUB'}</span><strong>${esc(b.title)}</strong></button><div class="tile-foot"><button class="book-name" data-open="${esc(b.id)}">${esc(b.title)}</button><small>${esc(b.progress||'טרם נקרא')}</small>${b.remote ? '' : `<button class="delete" data-delete="${esc(b.id)}" aria-label="מחק עותק מקומי">🗑</button>`}</div></article>`).join('')}</div>
+<div class="grid">${state.books.map(b=>`<article class="tile"><button class="cover" data-open="${esc(b.id)}"><span class="cover-icon">${b.type==='pdf'?'PDF':'EPUB'}</span><strong>${esc(b.title)}</strong></button><div class="tile-foot"><button class="book-name" data-open="${esc(b.id)}">${esc(b.title)}</button><small>${esc(libraryProgress(b))}</small>${b.remote ? '' : `<button class="delete" data-delete="${esc(b.id)}" aria-label="מחק עותק מקומי">🗑</button>`}</div></article>`).join('')}</div>
 ${state.books.length?'':'<div class="empty">אין עדיין ספרים.</div>'}
 </main><div id="notice" class="notice" hidden></div>`;
 setupSync(app.querySelector('#sync-devices'), refresh);
@@ -330,7 +338,7 @@ function trackEpubProgress(epub, rendition, book, labels, token) {
   }
 
   function update() {
-    if (!location?.start || token !== state.token) return;
+    if (!location?.start || token !== state.token) return false;
     const {cfi, displayed} = location.start;
     const anchor = progress.anchor || cfi;
     let pageNumber = displayed.page;
@@ -344,11 +352,14 @@ function trackEpubProgress(epub, rendition, book, labels, token) {
       }
     }
     const page = pageNumber > 0 && displayed.total > 0 ? pageNumber + ' / ' + displayed.total : '—';
-    const percent = locationCount > 0
-      ? Math.round(100 * epub.locations.locationFromCfi(anchor) / Math.max(1, locationCount - 1))
-      : null;
+    const index = locationCount > 0 ? epub.locations.locationFromCfi(anchor) : -1;
+    const percent = index >= 0 ? Math.min(100, Math.round(100 * index / Math.max(1, locationCount - 1))) : null;
     summary.textContent = percent === null ? page : page + ' · ' + percent + '%';
     summary.setAttribute('aria-label', percent === null ? page : page + ' · ' + labels.bookProgress(percent));
+    if (percent === null ||
+        (book.readingPercent?.location === anchor && book.readingPercent.value === percent)) return false;
+    book.readingPercent = {location: anchor, value: percent};
+    return true;
   }
 
   rendition.on('relocated', current => {
@@ -356,8 +367,8 @@ function trackEpubProgress(epub, rendition, book, labels, token) {
     location = current;
     if (progress.followScroll || !progress.anchor) progress.anchor = current.start.cfi;
     progress.followScroll = false;
-    update();
-    if (book.location === progress.anchor) return;
+    const changedPercent = update();
+    if (book.location === progress.anchor && !changedPercent) return;
     book.location = progress.anchor;
     book.progress = 'בקריאה';
     saveReadingState(book).catch(console.error);
@@ -372,7 +383,18 @@ function trackEpubProgress(epub, rendition, book, labels, token) {
       if (token === state.token) console.error(error);
     }
     if (token !== state.token) return;
+    if (update()) await saveBook(book).catch(console.error);
+  };
+
+  progress.flush = async () => {
+    if (!progress.followScroll || progress.resizing) return;
+    const current = rendition.currentLocation();
+    if (!current?.start?.cfi) return;
+    location = current;
+    progress.followScroll = false;
+    progress.anchor = book.location = current.start.cfi;
     update();
+    await saveReadingState(book);
   };
 
   progress.reflow = async (font, viewport) => {
@@ -411,7 +433,7 @@ function trackEpubProgress(epub, rendition, book, labels, token) {
   return progress;
 }
 
-async function drawPdf(){if(!state.pdf||!state.book)return;const token=state.token;const pageNumber=state.page;const page=await state.pdf.getPage(pageNumber);if(token!==state.token||pageNumber!==state.page)return;const scale=state.zoom;const viewport=page.getViewport({scale});const canvas=document.createElement('canvas');const dpr=Math.min(window.devicePixelRatio||1,2);canvas.width=Math.ceil(viewport.width*dpr);canvas.height=Math.ceil(viewport.height*dpr);canvas.style.width=viewport.width+'px';canvas.style.height=viewport.height+'px';const context=canvas.getContext('2d');await page.render({canvasContext:context,viewport,transform:dpr!==1?[dpr,0,0,dpr,0,0]:undefined}).promise;if(token!==state.token||pageNumber!==state.page)return;const target=app.querySelector('#viewport');target.replaceChildren(canvas);target.classList.add('pdf');app.querySelector('#position').textContent=pageNumber+' / '+state.pdf.numPages;state.book.location=pageNumber;state.book.progress='עמוד '+pageNumber+' מתוך '+state.pdf.numPages;await saveBook(state.book);}
+async function drawPdf(){if(!state.pdf||!state.book)return;const token=state.token;const pageNumber=state.page;const page=await state.pdf.getPage(pageNumber);if(token!==state.token||pageNumber!==state.page)return;const scale=state.zoom;const viewport=page.getViewport({scale});const canvas=document.createElement('canvas');const dpr=Math.min(window.devicePixelRatio||1,2);canvas.width=Math.ceil(viewport.width*dpr);canvas.height=Math.ceil(viewport.height*dpr);canvas.style.width=viewport.width+'px';canvas.style.height=viewport.height+'px';const context=canvas.getContext('2d');await page.render({canvasContext:context,viewport,transform:dpr!==1?[dpr,0,0,dpr,0,0]:undefined}).promise;if(token!==state.token||pageNumber!==state.page)return;const target=app.querySelector('#viewport');target.replaceChildren(canvas);target.classList.add('pdf');app.querySelector('#position').textContent=pageNumber+' / '+state.pdf.numPages;state.book.location=pageNumber;state.book.readingPercent={location:pageNumber,value:Math.round(100*pageNumber/state.pdf.numPages)};await saveBook(state.book);}
 async function navigate(n) {
   if (state.pdf) {
     state.page = Math.max(1, Math.min(state.pdf.numPages, state.page + n));
@@ -460,7 +482,7 @@ async function changeSize(n){if(state.pdf){state.zoom=Math.max(.5,Math.min(3,sta
   }
 }}
 async function destroy(){state.token++;state.readerTools?.abort();state.readerTools=null;try{state.rendition?.destroy();}catch{}try{state.epub?.destroy();}catch{}try{await state.pdf?.destroy();}catch{}state.rendition=null;state.epubProgress=null;state.epub=null;state.pdf=null;state.book=null;}
-async function closeBook(){await destroy();await refresh();}
+async function closeBook(){await state.epubProgress?.flush().catch(console.error);await destroy();await refresh();}
 refresh().catch(err=>{console.error(err);app.textContent='לא ניתן לפתוח את הספרייה המקומית בדפדפן הזה.';});
 
 window.addEventListener('focus', () => {
