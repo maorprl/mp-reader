@@ -271,3 +271,47 @@
   .page-tap-rail-left { left: 0; }
   .page-tap-rail-right { right: 0; }
 }
+
+.continuous-epub .epub-container {
+  scrollbar-width: thin;
+  overscroll-behavior: contain;
+}
+.reader-selection {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+.reader-selection i {
+  position: absolute;
+  background: #428ce45e;
+}
+.reader-selection button {
+  position: absolute;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  transform: translate(-50%, -50%);
+  touch-action: none;
+  pointer-events: auto;
+  cursor: grab;
+}
+.reader-selection button::after {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  top: 50%;
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  border-radius: 0 50% 50%;
+  background: #236bb8;
+  border: 1px solid white;
+}
+
+.stage:has(.continuous-epub) .highlight-confirmation {
+  top: 10px;
+  bottom: auto;
+}

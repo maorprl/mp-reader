@@ -1,4 +1,5 @@
 import ePub from 'epubjs';
+import {createReaderSelection} from './reader-selection.js';
 
 const translations = {
   he: {
@@ -8,7 +9,7 @@ const translations = {
     appearance: 'גופן ותצוגה', theme: 'מצב צבע', brightness: 'בהירות העמוד', system: 'אפס עמעום', themes: ['יום', 'ספיה', 'לילה', 'קונסול'], layout: 'פריסת הקריאה', width: 'רוחב', spacing: 'ריווח שורות', margins: 'שוליים מהצדדים',
     apply: 'החל', reset: 'ברירת מחדל', highlights: 'הדגשות והערות',
     select: 'בחר טקסט בספר כדי להדגיש אותו או להוסיף הערה.', note: 'הערה',
-    proceed: 'המשך בעמוד הבא', continueHint: 'בחר את המשך הטקסט בעמוד הזה.', save: 'שמור הדגשה', cancel: 'בטל', edit: 'ערוך הערה', update: 'שמור הערה', remove: 'הסר',
+    selectionHandles: ['תחילת הסימון', 'סוף הסימון'], save: 'שמור הדגשה', cancel: 'בטל', edit: 'ערוך הערה', update: 'שמור הערה', remove: 'הסר',
     passage: 'עבור לקטע', location: percent => 'מיקום בספר: ' + percent + '%',
     noItems: 'אין פריטים שמורים.', error: 'הפעולה נכשלה. אפשר לנסות שוב.',
   },
@@ -19,7 +20,7 @@ const translations = {
     appearance: 'Font and display', theme: 'Color mode', brightness: 'Page brightness', system: 'Reset dimming', themes: ['Day', 'Sepia', 'Night', 'Console'], layout: 'Reading layout', width: 'Width', spacing: 'Line spacing', margins: 'Side margins',
     apply: 'Apply', reset: 'Reset', highlights: 'Highlights and notes',
     select: 'Select text in the book to highlight it or add a note.', note: 'Note',
-    proceed: 'Continue on next page', continueHint: 'Select the rest of the text on this page.', save: 'Save highlight', cancel: 'Cancel', edit: 'Edit note', update: 'Save note', remove: 'Remove',
+    selectionHandles: ['Selection start', 'Selection end'], save: 'Save highlight', cancel: 'Cancel', edit: 'Edit note', update: 'Save note', remove: 'Remove',
     passage: 'Go to passage', location: percent => 'Book position: ' + percent + '%',
     noItems: 'No saved items.', error: 'Something went wrong. Please try again.',
   },
@@ -236,18 +237,23 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     ? Math.sign(ratio - 1) * Math.max(1, Math.round(Math.abs(ratio - 1) * 10)) : 0;
   let selected;
   let draft;
-  let fragments = [];
+  const mouseSelecting = new WeakSet();
   const confirmation = document.createElement('div');
   confirmation.className = 'highlight-confirmation';
   confirmation.hidden = true;
   confirmation.innerHTML = `<button type="button" data-confirm>${t.save}</button>
-    <button type="button" data-continue>${t.proceed}</button>
     <button type="button" data-cancel>${t.cancel}</button><span role="status"></span>`;
   stage.append(confirmation);
 
+  const selection = progress.continuous && createReaderSelection({
+    stage, viewport, rendition, progress, signal, labels: t.selectionHandles,
+    onChange: active => { confirmation.hidden = !active; },
+  });
+
   function clearDraft() {
+    draft?.contents.window.getSelection()?.removeAllRanges();
     draft = null;
-    fragments = [];
+    selection?.clear?.();
     confirmation.hidden = true;
     confirmation.querySelector('span').textContent = '';
   }
@@ -303,20 +309,36 @@ export function attachReaderTools({root, book, rendition, language, direction, p
         touchPress = {
           id: point.identifier, x: point.clientX, y: point.clientY,
           start: event.timeStamp, target: event.target,
-          hadSelection: Boolean(draft || contents?.window.getSelection()?.toString()),
+          hadSelection: Boolean(draft || selection?.active || contents?.window.getSelection()?.toString()),
         };
         return;
       }
       if (event.touches.length !== 2 || (!contents && !viewport.contains(event.target)) ||
-          draft || contents?.window.getSelection()?.toString()) return;
+          draft || selection?.active || contents?.window.getSelection()?.toString()) return;
       press = null;
       pinch = {start: distance(event.touches), ratio: 1};
       showFont(0);
       if (event.cancelable) event.preventDefault();
     }, {...options, passive: false});
     target.addEventListener('touchmove', event => {
-      if (touchPress && event.touches.length === 1 &&
-          Math.hypot(event.touches[0].clientX - touchPress.x, event.touches[0].clientY - touchPress.y) > 18) touchPress = null;
+      if (touchPress && event.touches.length === 1) {
+        const point = event.touches[0];
+        const dx = point.clientX - touchPress.x;
+        const dy = point.clientY - touchPress.y;
+        if (progress.continuous && contents && !progress.resizing &&
+            !contents.window.getSelection()?.toString() &&
+            (touchPress.scrolling || (Math.abs(dy) > 9 && Math.abs(dy) > Math.abs(dx)))) {
+          if (event.cancelable) event.preventDefault();
+          const scroller = rendition.manager.container;
+          const top = scroller.scrollTop;
+          scroller.scrollTop += (touchPress.lastY ?? touchPress.y) - point.clientY;
+          if (scroller.scrollTop !== top) progress.followScroll = true;
+          touchPress.scrolling = true;
+          touchPress.lastY = point.clientY;
+        } else if (Math.hypot(dx, dy) > 18) {
+          touchPress = null;
+        }
+      }
       if (!pinch || event.touches.length !== 2) return;
       if (event.cancelable) event.preventDefault();
       if (pinch.start > 0) pinch.ratio = distance(event.touches) / pinch.start;
@@ -327,7 +349,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
         const start = touchPress;
         touchPress = null;
         const point = Array.from(event.changedTouches).find(touch => touch.identifier === start?.id);
-        if (point && event.touches.length === 0) activateTap(start, point, event);
+        if (point && !start.scrolling && event.touches.length === 0) activateTap(start, point, event);
         return;
       }
       if (event.touches.length >= 2) return;
@@ -353,7 +375,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
         x: event.clientX,
         y: event.clientY,
         start: event.timeStamp,
-        hadSelection: Boolean(draft || contents?.window.getSelection()?.toString()),
+        hadSelection: Boolean(draft || selection?.active || contents?.window.getSelection()?.toString()),
       };
     }, options);
     target.addEventListener('pointercancel', () => { press = null; }, options);
@@ -363,10 +385,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
           event.defaultPrevented || navigating || progress.resizing || signal.aborted ||
           (start.target ?? event.target)?.closest?.('a, button, input, textarea, select, label, video, audio, [contenteditable], .reader-highlight, .highlight-confirmation')) return;
       if (contents?.window.getSelection()?.toString()) return;
-      if (start.hadSelection || draft) {
-        clearDraft();
-        return;
-      }
+      if (start.hadSelection || draft || selection?.active) return;
       const frame = contents?.window.frameElement;
       const x = point.clientX + (frame?.getBoundingClientRect().left ?? 0);
       const {left, width} = viewport.getBoundingClientRect();
@@ -399,12 +418,35 @@ export function attachReaderTools({root, book, rendition, language, direction, p
   }
 
   bindPageTaps(stage, null, {signal});
-  rendition.on('relocated', () => { if (!fragments.length) clearDraft(); });
+  if (!progress.continuous) rendition.on('relocated', clearDraft);
   window.addEventListener('keydown', handleKeys, {signal});
   rendition.on('keydown', handleKeys);
   rendition.hooks.content.register(contents => {
     bindPageTaps(contents.document, contents);
-    contents.addStylesheetRules({ html: {'touch-action': 'pan-x pan-y'} });
+    if (progress.continuous) {
+      contents.document.addEventListener('pointerdown', event => {
+        if (event.pointerType === 'mouse' && event.button === 0) mouseSelecting.add(contents);
+      });
+      contents.document.addEventListener('pointerup', () => {
+        if (mouseSelecting.delete(contents)) captureSelection(contents);
+      });
+      contents.document.addEventListener('pointercancel', () => { mouseSelecting.delete(contents); });
+    }
+    contents.addStylesheetRules({html: {'touch-action': progress.continuous ? 'none' : 'pan-x pan-y'}});
+    if (progress.continuous) {
+      if (direction === 'rtl' && !contents.document.documentElement.hasAttribute('dir')) {
+        contents.document.documentElement.setAttribute('dir', 'rtl');
+      }
+      contents.document.addEventListener('wheel', event => {
+        if (event.ctrlKey || !event.deltaY || progress.resizing || !event.cancelable) return;
+        event.preventDefault();
+        const scroller = rendition.manager.container;
+        const top = scroller.scrollTop;
+        const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? scroller.clientHeight : 1;
+        scroller.scrollTop += event.deltaY * scale;
+        if (scroller.scrollTop !== top) progress.followScroll = true;
+      }, {passive: false});
+    }
     const spacing = book.layout.spacing;
     if (spacing) {
       contents.addStylesheetRules({
@@ -601,76 +643,48 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       });
     }
   }
-  rendition.on('selected', (_cfi, contents) => {
-    if (signal.aborted || progress.resizing) return;
-    const selection = contents.window.getSelection();
-    const text = selection?.toString().trim();
-    if (!text || !selection.rangeCount) return;
-    // Read the live selection in case the user moved a handle before the event arrived.
-    draft = {cfi: contents.cfiFromRange(selection.getRangeAt(0)), text, contents};
-    confirmation.hidden = false;
-    confirmation.querySelector('span').textContent = '';
-  });
-  confirmation.querySelector('[data-cancel]').onclick = () => {
-    draft?.contents.window.getSelection()?.removeAllRanges();
-    clearDraft();
-  };
-  const confirm = confirmation.querySelector('[data-confirm]');
-  const cancel = confirmation.querySelector('[data-cancel]');
-  const proceed = confirmation.querySelector('[data-continue]');
-  proceed.onclick = async () => {
-    if (confirm.disabled || (!draft && !fragments.length)) return;
-    const current = rendition.currentLocation()?.start;
-    if (current?.displayed?.page >= current?.displayed?.total &&
-        !rendition.book.spine.get(current.index)?.next()) return;
-    if (draft) {
-      const {contents, cfi, text} = draft;
-      if (!fragments.some(part => part.cfi === cfi)) fragments.push({cfi, text});
-      draft = null;
-      contents.window.getSelection()?.removeAllRanges();
-    }
-    confirm.disabled = cancel.disabled = proceed.disabled = true;
-    try {
-      await navigate(1);
-      confirmation.querySelector('span').textContent = t.continueHint;
-    } catch (error) {
-      report(error);
-    } finally {
-      confirm.disabled = cancel.disabled = proceed.disabled = false;
-    }
-  };
-  confirm.onclick = async () => {
-    if ((!draft && !fragments.length) || confirm.disabled) return;
-    const selection = draft;
-    const parts = [...fragments];
-    if (selection && !parts.some(part => part.cfi === selection.cfi)) parts.push(selection);
-    const used = new Set(highlights.flatMap(rangesOf));
-    const newParts = parts.filter(part => !used.has(part.cfi));
-    if (!newParts.length) {
-      selection?.contents.window.getSelection()?.removeAllRanges();
-      clearDraft();
+  function captureSelection(contents) {
+    if (signal.aborted || progress.resizing || mouseSelecting.has(contents)) return;
+    const selectionInBook = contents.window.getSelection();
+    const text = selectionInBook?.toString().trim();
+    if (!text || !selectionInBook.rangeCount) return;
+    if (selection) {
+      selection.start(contents, selectionInBook);
       return;
     }
-    const entry = {cfi: newParts[0].cfi, text: newParts.map(part => part.text).join(' ')};
-    if (newParts.length > 1) entry.additionalRanges = newParts.slice(1).map(part => part.cfi);
-    confirm.disabled = true;
-    highlights.push(entry);
+    draft = {cfi: contents.cfiFromRange(selectionInBook.getRangeAt(0)), text, contents};
+    confirmation.hidden = false;
+  }
+  rendition.on('selected', (_cfi, contents) => captureSelection(contents));
+  const confirm = confirmation.querySelector('[data-confirm]');
+  const cancel = confirmation.querySelector('[data-cancel]');
+  cancel.onclick = clearDraft;
+  confirm.onclick = async () => {
+    if ((!draft && !selection?.active) || confirm.disabled) return;
+    confirm.disabled = cancel.disabled = true;
+    let entry;
     try {
-      await persist();
+      const parts = selection ? await selection.parts() : [draft];
       if (signal.aborted) return;
-      paint(entry);
-      showHighlights();
-      if (draft === selection) {
-        selection?.contents.window.getSelection()?.removeAllRanges();
-        clearDraft();
+      const used = new Set(highlights.flatMap(rangesOf));
+      const newParts = parts.filter(part => !used.has(part.cfi));
+      if (newParts.length) {
+        entry = {cfi: newParts[0].cfi, text: newParts.map(part => part.text).join(' ')};
+        if (newParts.length > 1) entry.additionalRanges = newParts.slice(1).map(part => part.cfi);
+        highlights.push(entry);
+        await persist();
+        if (signal.aborted) return;
+        paint(entry);
+        showHighlights();
       }
+      clearDraft();
     } catch (error) {
       const index = highlights.indexOf(entry);
       if (index >= 0) highlights.splice(index, 1);
       report(error);
       if (!signal.aborted) confirmation.querySelector('span').textContent = t.error;
     } finally {
-      confirm.disabled = false;
+      confirm.disabled = cancel.disabled = false;
     }
   };
   highlightForm.onsubmit = async event => {
@@ -686,7 +700,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
   highlights.forEach(paint);
   showHighlights();
   return {
-    canRefresh: () => !selected && !draft && !fragments.length,
+    canRefresh: () => !selected && !draft && !selection?.active,
     refresh() {
       const current = new Set(highlights.flatMap(rangesOf));
       for (const cfi of painted) {

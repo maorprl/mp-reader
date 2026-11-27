@@ -243,16 +243,28 @@ labels = readerLabels[language];
 shell(book, language);
 const view = app.querySelector('#viewport');
 view.replaceChildren();
+const continuous = state.epub.packaging?.metadata?.layout !== 'pre-paginated' &&
+  state.epub.displayOptions?.fixedLayout !== 'true';
+if (continuous) view.classList.add('continuous-epub');
 const direction = state.epub.packaging?.metadata?.direction === 'rtl' ||
   (!state.epub.packaging?.metadata?.direction && language === 'he') ? 'rtl' : 'ltr';
 setReaderLayout(app.querySelector('.stage'), {...defaultLayout, ...book.layout});
-state.rendition = state.epub.renderTo(view, {width:'100%', height:'100%', flow:'paginated',
-  spread:'none', defaultDirection:direction});for (const [name, [background, color]] of Object.entries(readingThemes)) {
+state.rendition = state.epub.renderTo(view, {width:'100%', height:'100%', flow:continuous ? 'scrolled-doc' : 'paginated',
+  manager:continuous ? 'continuous' : 'default', offset:view.clientHeight * 2,
+  spread:'none', defaultDirection:direction});
+if (continuous) {
+  await state.rendition.started;
+  if (state.token !== token) return;
+  // EPUB.js uses the rendition direction for scroll calculations. Keep text direction in the content.
+  state.rendition.direction('ltr');
+}
+for (const [name, [background, color]] of Object.entries(readingThemes)) {
   const className = 'mp-display-' + name;
   state.rendition.themes.register(className, {['body.' + className]: {background: background + ' !important', color: color + ' !important'}});
 }
 state.rendition.themes.select("mp-display-" + state.theme);
 state.rendition.themes.fontSize(state.font+'%');const progress = trackEpubProgress(state.epub, state.rendition, book, labels, token);
+progress.continuous = continuous;
 state.epubProgress = progress;
 state.readerTools = new AbortController();
 const tools = attachReaderTools({root: app, book, rendition: state.rendition, language,
@@ -267,7 +279,7 @@ if (state.token === token) watchReadingState(book, state.rendition, progress, to
 if(state.token!==token)return;const navigation=await state.epub.loaded.navigation;if(state.token!==token)return;const toc=app.querySelector('#toc-list');toc.replaceChildren();for(const item of navigation.toc||[]){const b=document.createElement('button');b.textContent=item.label;b.dir='auto';b.style.textAlign='start';b.onclick=async()=>{if (state.epubProgress.resizing) return;app.querySelector('#toc-panel').hidden=true;state.epubProgress.anchor = null;await state.rendition.display(item.href);};toc.append(b);}}}catch(err){if(state.token!==token)return;console.error(err);app.querySelector('#viewport').textContent=labels.openError;message(labels.errorNotice);}}
 function watchReadingState(book, rendition, progress, tools, signal) {
   let running = false;
-  const canApply = () => !signal.aborted && !progress.resizing && !progress.navigating && Boolean(progress.anchor) && tools.canRefresh();
+  const canApply = () => !signal.aborted && !progress.resizing && !progress.navigating && !progress.followScroll && Boolean(progress.anchor) && tools.canRefresh();
   async function refreshOpenBook() {
     if (running || document.visibilityState === 'hidden' || !canApply()) return;
     running = true;
@@ -308,8 +320,17 @@ function trackEpubProgress(epub, rendition, book, labels, token) {
     if (!location?.start || token !== state.token) return;
     const {cfi, displayed} = location.start;
     const anchor = progress.anchor || cfi;
-    const page = displayed.page > 0 && displayed.total > 0
-      ? displayed.page + ' / ' + displayed.total : '—';
+    let pageNumber = displayed.page;
+    if (progress.continuous) {
+      const frame = rendition.getContents().find(contents => contents.sectionIndex === location.start.index)
+        ?.window.frameElement;
+      const scroller = rendition.manager.container;
+      if (frame && scroller.clientHeight) {
+        const offset = scroller.getBoundingClientRect().top - frame.getBoundingClientRect().top;
+        pageNumber = Math.min(displayed.total, Math.floor(Math.max(0, offset) / scroller.clientHeight) + 1);
+      }
+    }
+    const page = pageNumber > 0 && displayed.total > 0 ? pageNumber + ' / ' + displayed.total : '—';
     const percent = locationCount > 0
       ? Math.round(100 * epub.locations.locationFromCfi(anchor) / Math.max(1, locationCount - 1))
       : null;
@@ -318,12 +339,14 @@ function trackEpubProgress(epub, rendition, book, labels, token) {
   }
 
   rendition.on('relocated', current => {
-    if (token !== state.token || progress.resizing) return;
+    if (token !== state.token || progress.resizing || !current.start?.cfi) return;
     location = current;
-    progress.anchor ??= current.start.cfi;
+    if (progress.followScroll || !progress.anchor) progress.anchor = current.start.cfi;
+    progress.followScroll = false;
+    update();
+    if (book.location === progress.anchor) return;
     book.location = progress.anchor;
     book.progress = 'בקריאה';
-    update();
     saveReadingState(book).catch(console.error);
   });
 
@@ -368,7 +391,7 @@ async function navigate(n) {
   const {rendition, epub, epubProgress: progress} = state;
   if (!rendition || !progress || progress.resizing || progress.navigating) return;
 
-  const current = rendition.currentLocation()?.start;
+  const current = progress.continuous ? null : rendition.currentLocation()?.start;
   let nextSection;
   // In RTL the renderer can try to scroll past the last column of a section.
   if (n > 0 && current?.displayed?.total > 0 && current.displayed.page >= current.displayed.total) {
