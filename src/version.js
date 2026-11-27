@@ -1,1 +1,1 @@
-export const readerVersion = '2.25';
+export const readerVersion = '2.26';

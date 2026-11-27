@@ -340,3 +340,27 @@
   width: auto;
   min-height: 44px;
 }
+
+@media (min-width: 621px) {
+  .reader {
+    --desktop-reader-header: 44px;
+    --desktop-reader-footer: 46px;
+  }
+  .reader .reading-top {
+    min-height: var(--desktop-reader-header);
+    padding-block: 4px;
+  }
+  .reader .reading-top button,
+  .reader .controls button {
+    padding-block: 5px;
+  }
+  .reader .controls {
+    height: auto;
+    min-height: var(--desktop-reader-footer);
+    padding-block: 4px;
+  }
+  .reader .toc-panel {
+    top: var(--desktop-reader-header);
+    bottom: var(--desktop-reader-footer);
+  }
+}
