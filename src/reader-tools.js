@@ -250,7 +250,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
   });
 
   function clearDraft() {
-    draft?.contents.window.getSelection()?.removeAllRanges();
+    draft?.contents.window?.getSelection()?.removeAllRanges();
     draft = null;
     selection?.clear?.();
     showConfirmation(false);
@@ -320,6 +320,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       const rect = caret.getBoundingClientRect();
       if (point.clientX < rect.left || point.clientX > rect.right ||
           point.clientY < rect.top || point.clientY > rect.bottom) return;
+      draft = null;
       selection.start(contents, caret);
       touchPress = null;
     }
@@ -466,10 +467,15 @@ export function attachReaderTools({root, book, rendition, language, direction, p
         contents.document.documentElement.classList.remove('reader-touch-input');
         mouseSelecting.add(contents);
       });
-      contents.document.addEventListener('pointerup', () => {
-        if (mouseSelecting.delete(contents)) captureSelection(contents);
+      const finishMouseSelection = () => {
+        if (mouseSelecting.delete(contents)) requestAnimationFrame(() => captureSelection(contents));
+      };
+      contents.document.addEventListener('mouseup', finishMouseSelection, true);
+      contents.document.addEventListener('pointerup', finishMouseSelection, true);
+      contents.document.addEventListener('pointercancel', finishMouseSelection, true);
+      contents.document.addEventListener('pointermove', event => {
+        if (event.pointerType === 'mouse' && !(event.buttons & 1)) finishMouseSelection();
       });
-      contents.document.addEventListener('pointercancel', () => { mouseSelecting.delete(contents); });
       contents.addStylesheetRules({
         'html.reader-touch-input body': {
           '-webkit-user-select': 'none',
@@ -699,14 +705,10 @@ export function attachReaderTools({root, book, rendition, language, direction, p
   }
   function captureSelection(contents) {
     if (signal.aborted || progress.resizing || mouseSelecting.has(contents) || touchSelecting.has(contents)) return;
-    const selectionInBook = contents.window.getSelection();
+    const selectionInBook = contents.window?.getSelection();
     const text = selectionInBook?.toString().trim();
     if (!text || !selectionInBook.rangeCount) return;
-    if (selection) {
-      selection.start(contents, selectionInBook.getRangeAt(0));
-      selectionInBook.removeAllRanges();
-      return;
-    }
+    if (selection?.active) selection.clear();
     draft = {cfi: contents.cfiFromRange(selectionInBook.getRangeAt(0)), text, contents};
     showConfirmation(true);
   }
@@ -719,7 +721,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     confirm.disabled = cancel.disabled = true;
     let entry;
     try {
-      const parts = selection ? await selection.parts() : [draft];
+      const parts = draft ? [draft] : await selection.parts();
       if (signal.aborted) return;
       const used = new Set(highlights.flatMap(rangesOf));
       const newParts = parts.filter(part => !used.has(part.cfi));
