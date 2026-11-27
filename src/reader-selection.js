@@ -23,77 +23,17 @@ function sectionRange(doc, index, start, end) {
   return range;
 }
 
-function clippedLine(contents, rect, edge, bounds, isTop) {
-  const {document: doc} = contents;
-  const y = edge - rect.top + (isTop ? 1 : -1);
-  if (y < 0 || y >= rect.height || !doc.caretRangeFromPoint) return 0;
-  let inset = 0;
-  for (const fraction of [0.12, 0.28, 0.5, 0.72, 0.88]) {
-    const x = bounds.left + bounds.width * fraction - rect.left;
-    const range = doc.caretRangeFromPoint(x, y);
-    const node = range?.startContainer;
-    if (node?.nodeType !== Node.TEXT_NODE || !node.length) continue;
-    const offset = Math.min(range.startOffset, node.length - 1);
-    range.setStart(node, offset);
-    range.setEnd(node, offset + 1);
-    const glyph = range.getBoundingClientRect();
-    const top = glyph.top + rect.top;
-    const bottom = glyph.bottom + rect.top;
-    if (top < edge && bottom > edge) inset = Math.max(inset, isTop ? bottom - edge : edge - top);
-  }
-  return inset;
-}
-
 export function createReaderSelection({stage, viewport, rendition, progress, signal, onChange, labels}) {
   const overlay = document.createElement('div');
   overlay.className = 'reader-selection';
   const marks = document.createElement('div');
   marks.setAttribute('aria-hidden', 'true');
-  const edges = [true, false].map(() => {
-    const margin = document.createElement('div');
-    margin.className = 'reader-selection-edge';
-    margin.hidden = true;
-    return margin;
-  });
-  overlay.append(marks, ...edges);
+  overlay.append(marks);
   stage.append(overlay);
   const endpoints = [];
   let drag;
   let frame = 0;
   let scroller;
-  let edgeTimer;
-
-  function updateEdges() {
-    if (signal.aborted) return;
-    const bounds = stage.getBoundingClientRect();
-    const visible = scroller.getBoundingClientRect();
-    edges.forEach((margin, index) => {
-      const isTop = index === 0;
-      const edge = isTop ? visible.top : visible.bottom;
-      let inset = 0;
-      for (const contents of rendition.getContents()) {
-        const rect = contents.window.frameElement?.getBoundingClientRect();
-        if (rect && rect.top < edge && rect.bottom > edge) {
-          inset = Math.max(inset, clippedLine(contents, rect, edge, visible, isTop));
-        }
-      }
-      margin.hidden = !inset;
-      Object.assign(margin.style, {
-        left: visible.left - bounds.left + 'px',
-        top: (isTop ? edge : edge - inset) - bounds.top + 'px',
-        width: scroller.clientWidth + 'px',
-        height: inset + 'px',
-      });
-    });
-  }
-
-  function scheduleEdges() {
-    if (!scroller) return;
-    edges.forEach(margin => { margin.hidden = true; });
-    clearTimeout(edgeTimer);
-    edgeTimer = setTimeout(updateEdges, 80);
-  }
-
   function repaint() {
     frame = 0;
     if (signal.aborted || !endpoints.length) return;
@@ -205,18 +145,13 @@ export function createReaderSelection({stage, viewport, rendition, progress, sig
   rendition.on('rendered', () => {
     if (!scroller) {
       scroller = rendition.manager.container;
-      scroller.addEventListener('scroll', () => {
-        schedule();
-        scheduleEdges();
-      }, {signal, passive: true});
+      scroller.addEventListener('scroll', schedule, {signal, passive: true});
     }
     schedule();
-    scheduleEdges();
   });
   rendition.on('relocated', schedule);
   signal.addEventListener('abort', () => {
     cancelAnimationFrame(frame);
-    clearTimeout(edgeTimer);
   }, {once: true});
 
   return {

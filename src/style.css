@@ -309,14 +309,6 @@
   border: 1px solid white;
 }
 
-.reader-selection-edge {
-  position: absolute;
-  background: var(--reader-paper, #fffdf7);
-}
-.stage[data-theme="sepia"] { --reader-paper: #f1e2c5; }
-.stage[data-theme="night"] { --reader-paper: #20252b; }
-.stage[data-theme="console"] { --reader-paper: #171c18; }
-
 @media (max-width: 620px) {
   .epub-progress:has(.highlight-confirmation:not([hidden])) > :is(#prev, #next, .open-reader-tools) {
     display: none;

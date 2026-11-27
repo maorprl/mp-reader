@@ -5,6 +5,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import {allBooks,getBook,saveBook,removeBook} from './db.js';
 import {attachReaderTools, defaultLayout, setReaderLayout} from './reader-tools.js';
 import {setupSync, showPairingScreen, syncBook, isPaired, readCatalog, uploadBook, downloadBook, identify, localLibrary} from './sync.js';
+import {readingPageOffset} from './reading-page.js';
 import './style.css';
 pdfjs.GlobalWorkerOptions.workerSrc=workerUrl;
 const app=document.querySelector('#app');
@@ -396,7 +397,7 @@ async function navigate(n) {
     const scroller = rendition.manager.container;
     if (!scroller?.clientHeight) return;
     const start = scroller.scrollTop;
-    scroller.scrollTop = start + n * scroller.clientHeight;
+    scroller.scrollTop = readingPageOffset(scroller, rendition.getContents(), n);
     if (scroller.scrollTop !== start) progress.followScroll = true;
     return;
   }
