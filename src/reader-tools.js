@@ -4,7 +4,7 @@ import {createReaderSelection} from './reader-selection.js';
 
 const translations = {
   he: {
-    tools: 'כלי קריאה', close: 'סגור', bookmarks: 'סימניות', add: 'הוסף סימנייה כאן',
+    tools: 'כלי קריאה', close: 'סגור', library: 'לספרייה', bookmarks: 'סימניות', add: 'הוסף סימנייה כאן',
     bookmark: 'סימנייה', search: 'חיפוש בספר', find: 'חפש', searching: 'מחפש…',
     noResults: 'לא נמצאו תוצאות.', limit: 'מוצגות 100 התוצאות הראשונות.',
     appearance: 'גופן ותצוגה', theme: 'מצב צבע', brightness: 'בהירות העמוד', system: 'אפס עמעום', themes: ['יום', 'ספיה', 'לילה', 'קונסול'], layout: 'פריסת הקריאה', width: 'רוחב', spacing: 'ריווח שורות', margins: 'שוליים מהצדדים',
@@ -15,7 +15,7 @@ const translations = {
     noItems: 'אין פריטים שמורים.', error: 'הפעולה נכשלה. אפשר לנסות שוב.',
   },
   en: {
-    tools: 'Reading tools', close: 'Close', bookmarks: 'Bookmarks', add: 'Bookmark this location',
+    tools: 'Reading tools', close: 'Close', library: 'Library', bookmarks: 'Bookmarks', add: 'Bookmark this location',
     bookmark: 'Bookmark', search: 'Search book', find: 'Search', searching: 'Searching…',
     noResults: 'No matches found.', limit: 'Showing the first 100 matches.',
     appearance: 'Font and display', theme: 'Color mode', brightness: 'Page brightness', system: 'Reset dimming', themes: ['Day', 'Sepia', 'Night', 'Console'], layout: 'Reading layout', width: 'Width', spacing: 'Line spacing', margins: 'Side margins',
@@ -114,8 +114,11 @@ export function attachReaderTools({root, book, rendition, language, direction, p
   panel.setAttribute('aria-label', t.tools);
   panel.hidden = true;
   panel.innerHTML = `
-    <button type="button" data-close>${t.close}</button>
-    <small class="reader-version" dir="ltr">v${readerVersion}</small>
+    <div class="reader-tools-header">
+      <button type="button" data-library>${t.library}</button>
+      <small class="reader-version" dir="ltr">v${readerVersion}</small>
+      <button type="button" data-close>${t.close}</button>
+    </div>
     <details data-search>
       <summary>${t.search}</summary>
       <form data-search-form>
@@ -275,6 +278,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     showPanel(true);
     query('[data-close]').focus();
   };
+  query('[data-library]').onclick = () => root.querySelector('#back').click();
   query('[data-close]').onclick = () => {
     showPanel(false);
     toolsButton.focus();

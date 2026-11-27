@@ -328,3 +328,14 @@
 .continuous-epub .epub-container {
   clip-path: var(--zoom-clip, none);
 }
+
+.reader-tools-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.reader-tools-header button {
+  width: auto;
+  min-height: 44px;
+}
