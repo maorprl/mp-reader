@@ -4,8 +4,14 @@ export function readingPageOffset(scroller, contents, direction) {
   const top = bounds.top + scroller.clientTop;
   const distance = Math.min(scroller.clientHeight, Math.max(0, window.innerHeight - top));
   const boundary = top + direction * distance;
+  const firstLine = textLineAt(contents, boundary)?.top ?? Infinity;
+  const target = Number.isFinite(firstLine) ? Math.floor(firstLine - top) : direction * distance;
+  return scroller.scrollTop + (Math.sign(target) === direction ? target : direction * distance);
+}
+
+export function textLineAt(contents, boundary) {
   const limit = boundary + 64;
-  let firstLine = Infinity;
+  let firstLine;
 
   for (const content of contents) {
     const frame = content.window?.frameElement?.getBoundingClientRect();
@@ -21,11 +27,14 @@ export function readingPageOffset(scroller, contents, direction) {
       for (const line of range.getClientRects()) {
         const lineTop = line.top + frame.top;
         if (line.height && line.bottom + frame.top > boundary + 1 &&
-            lineTop <= limit) firstLine = Math.min(firstLine, lineTop);
+            lineTop <= limit && (!firstLine || lineTop < firstLine.top)) {
+          firstLine = {top: lineTop, bottom: line.bottom + frame.top};
+        } else if (firstLine?.top === lineTop) {
+          firstLine.bottom = Math.max(firstLine.bottom, line.bottom + frame.top);
+        }
       }
     }
   }
 
-  const target = Number.isFinite(firstLine) ? Math.floor(firstLine - top) : direction * distance;
-  return scroller.scrollTop + (Math.sign(target) === direction ? target : direction * distance);
+  return firstLine;
 }

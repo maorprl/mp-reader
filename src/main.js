@@ -5,7 +5,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import {allBooks,getBook,saveBook,removeBook} from './db.js';
 import {attachReaderTools, defaultLayout, setReaderLayout} from './reader-tools.js';
 import {setupSync, showPairingScreen, syncBook, isPaired, readCatalog, uploadBook, downloadBook, identify, localLibrary} from './sync.js';
-import {readingPageOffset} from './reading-page.js';
+import {readingPageOffset, textLineAt} from './reading-page.js';
 import './style.css';
 pdfjs.GlobalWorkerOptions.workerSrc=workerUrl;
 const app=document.querySelector('#app');
@@ -317,6 +317,17 @@ function trackEpubProgress(epub, rendition, book, labels, token) {
   const summary = app.querySelector('.progress-summary');
   let location;
   let locationCount = 0;
+  const readerViewport = app.querySelector('#viewport');
+  let zoomOffset;
+  function clearZoomEdge() {
+    readerViewport.style.removeProperty('--zoom-clip');
+    zoomOffset = undefined;
+  }
+  if (readerViewport.classList.contains('continuous-epub')) {
+    readerViewport.addEventListener('scroll', event => {
+      if (zoomOffset !== undefined && event.target.scrollTop !== zoomOffset) clearZoomEdge();
+    }, true);
+  }
 
   function update() {
     if (!location?.start || token !== state.token) return;
@@ -368,12 +379,29 @@ function trackEpubProgress(epub, rendition, book, labels, token) {
     if (progress.resizing || !location) return;
     progress.resizing = true;
     try {
-      const anchor = progress.anchor || location.start.cfi;
+      const liveAnchor = progress.followScroll ? rendition.currentLocation()?.start?.cfi : null;
+      const anchor = liveAnchor || progress.anchor || location.start.cfi;
+      clearZoomEdge();
       if (font !== null) rendition.themes.fontSize(font + '%');
       if (viewport) rendition.resize(viewport.clientWidth, viewport.clientHeight, anchor);
       rendition.clear();
       await rendition.display(anchor);
       if (token !== state.token) return;
+      if (progress.continuous && font !== null) {
+        const scroller = rendition.manager.container;
+        const contents = rendition.getContents();
+        const top = scroller.getBoundingClientRect().top + scroller.clientTop;
+        const line = textLineAt(contents, top);
+        if (line && line.top < top && line.bottom > top) {
+          scroller.scrollTop -= Math.ceil(top - line.top);
+        }
+        const bottom = Math.min(window.innerHeight, top + scroller.clientHeight);
+        const lastLine = textLineAt(contents, bottom - 1);
+        if (lastLine && lastLine.top < bottom && lastLine.bottom > bottom) {
+          readerViewport.style.setProperty('--zoom-clip', `inset(0 0 ${Math.ceil(bottom - lastLine.top)}px 0)`);
+          zoomOffset = scroller.scrollTop;
+        }
+      }
       location = rendition.currentLocation();
       update();
     } finally {

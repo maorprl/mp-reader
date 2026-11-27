@@ -324,3 +324,7 @@
   opacity: 0.75;
   white-space: nowrap;
 }
+
+.continuous-epub .epub-container {
+  clip-path: var(--zoom-clip, none);
+}
