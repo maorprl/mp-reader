@@ -224,12 +224,10 @@ export function createReaderSelection({stage, viewport, rendition, progress, sig
 
   return {
     get active() { return endpoints.length > 0; },
-    start(contents, selection) {
-      const range = selection.getRangeAt(0);
+    start(contents, range) {
       endpoints.splice(0, 2,
         location(contents, range.startContainer, range.startOffset),
         location(contents, range.endContainer, range.endOffset));
-      selection.removeAllRanges();
       schedule();
       onChange(true);
     },

@@ -231,6 +231,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
   let selected;
   let draft;
   const mouseSelecting = new WeakSet();
+  const touchSelecting = new WeakSet();
   const confirmation = document.createElement('div');
   confirmation.className = 'highlight-confirmation';
   confirmation.hidden = true;
@@ -296,12 +297,43 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     let navigating = false;
     let pinch;
     let touchPress;
+    let holdTimer;
+    function cancelHold() {
+      clearTimeout(holdTimer);
+      holdTimer = undefined;
+    }
+    signal.addEventListener('abort', cancelHold, {once: true});
+    function startTouchSelection(point) {
+      if (!contents?.document || progress.resizing || selection?.active) return;
+      const caret = contents.document.caretRangeFromPoint?.(point.clientX, point.clientY);
+      const node = caret?.startContainer;
+      if (node?.nodeType !== Node.TEXT_NODE || !node.length) return;
+      const offset = Math.min(caret.startOffset, node.length - 1);
+      const word = Intl.Segmenter
+        ? new Intl.Segmenter(language, {granularity: 'word'}).segment(node.data).containing(offset)
+        : [...node.data.matchAll(/[^\s]+/g)].map(match => ({
+          index: match.index, segment: match[0], isWordLike: true,
+        })).find(match => match.index <= offset && offset < match.index + match.segment.length);
+      if (!word?.isWordLike) return;
+      caret.setStart(node, word.index);
+      caret.setEnd(node, word.index + word.segment.length);
+      const rect = caret.getBoundingClientRect();
+      if (point.clientX < rect.left || point.clientX > rect.right ||
+          point.clientY < rect.top || point.clientY > rect.bottom) return;
+      selection.start(contents, caret);
+      touchPress = null;
+    }
     const distance = touches => Math.hypot(
       touches[0].clientX - touches[1].clientX,
       touches[0].clientY - touches[1].clientY,
     );
     target.addEventListener('touchstart', event => {
+      cancelHold();
       touchPress = null;
+      if (contents && selection) {
+        touchSelecting.add(contents);
+        contents.document.documentElement.classList.add('reader-touch-input');
+      }
       if (event.touches.length === 1 && !pinch) {
         const point = event.touches[0];
         touchPress = {
@@ -309,6 +341,10 @@ export function attachReaderTools({root, book, rendition, language, direction, p
           start: event.timeStamp, target: event.target,
           hadSelection: Boolean(draft || selection?.active || contents?.window.getSelection()?.toString()),
         };
+        if (contents && selection && !touchPress.hadSelection &&
+            !event.target.closest?.('a, button, input, textarea, select, label, video, audio, [contenteditable]')) {
+          holdTimer = setTimeout(() => startTouchSelection(point), 700);
+        }
         return;
       }
       if (event.touches.length !== 2 || (!contents && !viewport.contains(event.target)) ||
@@ -323,6 +359,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
         const point = event.touches[0];
         const dx = point.clientX - touchPress.x;
         const dy = point.clientY - touchPress.y;
+        if (Math.hypot(dx, dy) > 8) cancelHold();
         if (progress.continuous && contents && !progress.resizing &&
             !contents.window.getSelection()?.toString() &&
             (touchPress.scrolling || (Math.abs(dy) > 9 && Math.abs(dy) > Math.abs(dx)))) {
@@ -343,6 +380,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       showFont(pinchSteps(pinch.ratio));
     }, {...options, passive: false});
     target.addEventListener('touchend', event => {
+      cancelHold();
       if (!pinch) {
         const start = touchPress;
         touchPress = null;
@@ -361,6 +399,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       zoomTimeout = setTimeout(() => { zoomStatus.hidden = true; }, 900);
     }, {...options, passive: false});
     target.addEventListener('touchcancel', () => {
+      cancelHold();
       if (pinch) zoomStatus.hidden = true;
       pinch = null;
       press = null;
@@ -422,12 +461,22 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     bindPageTaps(contents.document, contents);
     if (progress.continuous) {
       contents.document.addEventListener('pointerdown', event => {
-        if (event.pointerType === 'mouse' && event.button === 0) mouseSelecting.add(contents);
+        if (event.pointerType === 'touch' || event.button !== 0) return;
+        touchSelecting.delete(contents);
+        contents.document.documentElement.classList.remove('reader-touch-input');
+        mouseSelecting.add(contents);
       });
       contents.document.addEventListener('pointerup', () => {
         if (mouseSelecting.delete(contents)) captureSelection(contents);
       });
       contents.document.addEventListener('pointercancel', () => { mouseSelecting.delete(contents); });
+      contents.addStylesheetRules({
+        'html.reader-touch-input body': {
+          '-webkit-user-select': 'none',
+          'user-select': 'none',
+          '-webkit-touch-callout': 'none',
+        },
+      }, 'reader-touch-selection');
     }
     contents.addStylesheetRules({html: {'touch-action': progress.continuous ? 'none' : 'pan-x pan-y'}});
     if (progress.continuous && language === 'en') {
@@ -649,12 +698,13 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     }
   }
   function captureSelection(contents) {
-    if (signal.aborted || progress.resizing || mouseSelecting.has(contents)) return;
+    if (signal.aborted || progress.resizing || mouseSelecting.has(contents) || touchSelecting.has(contents)) return;
     const selectionInBook = contents.window.getSelection();
     const text = selectionInBook?.toString().trim();
     if (!text || !selectionInBook.rangeCount) return;
     if (selection) {
-      selection.start(contents, selectionInBook);
+      selection.start(contents, selectionInBook.getRangeAt(0));
+      selectionInBook.removeAllRanges();
       return;
     }
     draft = {cfi: contents.cfiFromRange(selectionInBook.getRangeAt(0)), text, contents};
