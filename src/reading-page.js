@@ -9,8 +9,8 @@ export function readingPageOffset(scroller, contents, direction) {
   return scroller.scrollTop + (Math.sign(target) === direction ? target : direction * distance);
 }
 
-export function textLineAt(contents, boundary) {
-  const limit = boundary + 64;
+export function textLineAt(contents, boundary, {crossing = false} = {}) {
+  const limit = boundary + (crossing ? 0 : 64);
   let firstLine;
 
   for (const content of contents) {
@@ -26,7 +26,16 @@ export function textLineAt(contents, boundary) {
       range.selectNodeContents(node);
       for (const line of range.getClientRects()) {
         const lineTop = line.top + frame.top;
-        if (line.height && line.bottom + frame.top > boundary + 1 &&
+        const lineBottom = line.bottom + frame.top;
+        if (crossing) {
+          if (!line.height || lineTop >= boundary || lineBottom <= boundary) continue;
+          firstLine = {
+            top: Math.min(firstLine?.top ?? lineTop, lineTop),
+            bottom: Math.max(firstLine?.bottom ?? lineBottom, lineBottom),
+          };
+          continue;
+        }
+        if (line.height && lineBottom > boundary + 1 &&
             lineTop <= limit && (!firstLine || lineTop < firstLine.top)) {
           firstLine = {top: lineTop, bottom: line.bottom + frame.top};
         } else if (firstLine?.top === lineTop) {

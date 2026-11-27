@@ -411,16 +411,22 @@ function trackEpubProgress(epub, rendition, book, labels, token) {
       if (token !== state.token) return;
       if (progress.continuous && font !== null) {
         const scroller = rendition.manager.container;
+        const fontPromises = rendition.getContents().map(contents => contents.document?.fonts?.ready);
+        await Promise.all(fontPromises);
+        await new Promise(requestAnimationFrame);
+        if (token !== state.token) return;
         const contents = rendition.getContents();
-        const top = scroller.getBoundingClientRect().top + scroller.clientTop;
-        const line = textLineAt(contents, top);
-        if (line && line.top < top && line.bottom > top) {
-          scroller.scrollTop -= Math.ceil(top - line.top);
-        }
+        const bounds = scroller.getBoundingClientRect();
+        const top = bounds.top + scroller.clientTop;
+        const line = textLineAt(contents, top, {crossing: true});
+        if (line) scroller.scrollTop -= Math.ceil(top - line.top);
+
+        // Measure again after the top adjustment. The CSS inset is relative to the border box.
         const bottom = Math.min(window.innerHeight, top + scroller.clientHeight);
-        const lastLine = textLineAt(contents, bottom - 1);
-        if (lastLine && lastLine.top < bottom && lastLine.bottom > bottom) {
-          readerViewport.style.setProperty('--zoom-clip', `inset(0 0 ${Math.ceil(bottom - lastLine.top)}px 0)`);
+        const lastLine = textLineAt(contents, bottom, {crossing: true});
+        if (lastLine) {
+          const inset = Math.ceil(bounds.bottom - lastLine.top);
+          readerViewport.style.setProperty('--zoom-clip', `inset(0 0 ${inset}px 0)`);
           zoomOffset = scroller.scrollTop;
         }
       }
