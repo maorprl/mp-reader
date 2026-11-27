@@ -305,7 +305,22 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     signal.addEventListener('abort', cancelHold, {once: true});
     function startTouchSelection(point) {
       if (!contents?.document || progress.resizing || selection?.active) return;
-      const caret = contents.document.caretRangeFromPoint?.(point.clientX, point.clientY);
+      const doc = contents.document;
+      // Hit testing needs selectable text even though native touch selection is disabled.
+      doc.documentElement.classList.remove('reader-touch-input');
+      let caret;
+      try {
+        const position = doc.caretPositionFromPoint?.(point.clientX, point.clientY);
+        if (position) {
+          caret = doc.createRange();
+          caret.setStart(position.offsetNode, position.offset);
+          caret.collapse(true);
+        } else {
+          caret = doc.caretRangeFromPoint?.(point.clientX, point.clientY);
+        }
+      } finally {
+        doc.documentElement.classList.add('reader-touch-input');
+      }
       const node = caret?.startContainer;
       if (node?.nodeType !== Node.TEXT_NODE || !node.length) return;
       const offset = Math.min(caret.startOffset, node.length - 1);
@@ -328,6 +343,11 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       touches[0].clientX - touches[1].clientX,
       touches[0].clientY - touches[1].clientY,
     );
+    if (contents && selection) {
+      target.addEventListener('contextmenu', event => {
+        if (touchPress || event.pointerType === 'touch') event.preventDefault();
+      }, true);
+    }
     target.addEventListener('touchstart', event => {
       cancelHold();
       touchPress = null;
@@ -344,7 +364,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
         };
         if (contents && selection && !touchPress.hadSelection &&
             !event.target.closest?.('a, button, input, textarea, select, label, video, audio, [contenteditable]')) {
-          holdTimer = setTimeout(() => startTouchSelection(point), 700);
+          holdTimer = setTimeout(() => startTouchSelection(point), 550);
         }
         return;
       }
