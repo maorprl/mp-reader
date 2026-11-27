@@ -167,13 +167,13 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     <p data-error role="status"></p>`;
   root.querySelector('.reader').append(panel);
   const query = selector => panel.querySelector(selector);
-  const settings = root.querySelector('.settings');
-  const appearance = settings.querySelector('.appearance-controls');
-  const footer = root.querySelector('.controls');
-  const nav = footer.querySelector('.nav');
-  const previous = nav.querySelector('#prev');
-  const next = nav.querySelector('#next');
-  const footerProgress = footer.querySelector('.epub-progress');
+  const appearance = root.querySelector('.settings .appearance-controls');
+  const previous = root.querySelector('#prev');
+  const next = root.querySelector('#next');
+  const footerProgress = root.querySelector('.epub-progress');
+  footerProgress.dir = direction;
+  footerProgress.prepend(previous);
+  footerProgress.append(toolsButton, next);
   for (const side of ['left', 'right']) {
     const rail = document.createElement('button');
     const forward = (side === 'left') === (direction === 'rtl');
@@ -185,15 +185,8 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     stage.append(rail);
   }
   function arrangeAppearance() {
-    if (compact.matches) {
-      query('[data-appearance]').append(appearance);
-      footerProgress.prepend(previous);
-      footerProgress.append(toolsButton, next);
-    } else {
-      nav.append(previous, next);
-      settings.prepend(appearance);
-      settings.append(toolsButton);
-    }
+    if (compact.matches) query('[data-appearance]').append(appearance);
+    else toolsButton.before(appearance);
   }
   compact.addEventListener('change', arrangeAppearance, {signal});
   arrangeAppearance();
@@ -433,6 +426,15 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       contents.document.addEventListener('pointercancel', () => { mouseSelecting.delete(contents); });
     }
     contents.addStylesheetRules({html: {'touch-action': progress.continuous ? 'none' : 'pan-x pan-y'}});
+    if (progress.continuous && language === 'en') {
+      contents.addStylesheetRules({
+        p: {
+          'font-family': 'Georgia, "Times New Roman", serif !important',
+          'font-weight': '400 !important',
+          'text-align': 'start !important',
+        },
+      }, 'reader-english-body');
+    }
     if (progress.continuous) {
       if (direction === 'rtl' && !contents.document.documentElement.hasAttribute('dir')) {
         contents.document.documentElement.setAttribute('dir', 'rtl');

@@ -4,13 +4,21 @@
   height: auto;
   min-height: 70px;
   flex: none;
-  flex-wrap: wrap;
+}
+.controls:has(.epub-progress) > :is(.nav, .settings) {
+  display: none;
 }
 .epub-progress {
-  flex-basis: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
   text-align: center;
-  white-space: pre-wrap;
   font-size: 0.875rem;
+}
+.epub-progress .appearance-controls {
+  direction: ltr;
 }
 
 .stage:has(+ .controls .epub-progress) {
@@ -129,12 +137,7 @@
     padding: 0;
     gap: 0;
   }
-  .controls:has(.epub-progress) .nav,
-  .controls:has(.epub-progress) .settings {
-    padding: 6px 8px 0;
-  }
-  .reading-clean:has(.epub-progress) .reading-top,
-  .reading-clean .controls:has(.epub-progress) > :is(.nav, .settings) {
+  .reading-clean:has(.epub-progress) .reading-top {
     display: none;
   }
   .epub-progress .progress-summary {
