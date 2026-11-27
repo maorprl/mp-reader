@@ -4,7 +4,7 @@ import {createReaderSelection} from './reader-selection.js';
 
 const translations = {
   he: {
-    tools: 'כלי קריאה', close: 'סגור', library: 'לספרייה', bookmarks: 'סימניות', add: 'הוסף סימנייה כאן',
+    tools: 'כלי קריאה', close: 'סגור', library: 'לספרייה', toc: 'תוכן עניינים', bookmarks: 'סימניות', add: 'הוסף סימנייה כאן',
     bookmark: 'סימנייה', search: 'חיפוש בספר', find: 'חפש', searching: 'מחפש…',
     noResults: 'לא נמצאו תוצאות.', limit: 'מוצגות 100 התוצאות הראשונות.',
     appearance: 'גופן ותצוגה', theme: 'מצב צבע', brightness: 'בהירות העמוד', system: 'אפס עמעום', themes: ['יום', 'ספיה', 'לילה', 'קונסול'], layout: 'פריסת הקריאה', width: 'רוחב', spacing: 'ריווח שורות', margins: 'שוליים מהצדדים',
@@ -15,7 +15,7 @@ const translations = {
     noItems: 'אין פריטים שמורים.', error: 'הפעולה נכשלה. אפשר לנסות שוב.',
   },
   en: {
-    tools: 'Reading tools', close: 'Close', library: 'Library', bookmarks: 'Bookmarks', add: 'Bookmark this location',
+    tools: 'Reading tools', close: 'Close', library: 'Library', toc: 'Table of contents', bookmarks: 'Bookmarks', add: 'Bookmark this location',
     bookmark: 'Bookmark', search: 'Search book', find: 'Search', searching: 'Searching…',
     noResults: 'No matches found.', limit: 'Showing the first 100 matches.',
     appearance: 'Font and display', theme: 'Color mode', brightness: 'Page brightness', system: 'Reset dimming', themes: ['Day', 'Sepia', 'Night', 'Console'], layout: 'Reading layout', width: 'Width', spacing: 'Line spacing', margins: 'Side margins',
@@ -119,6 +119,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       <small class="reader-version" dir="ltr">v${readerVersion}</small>
       <button type="button" data-close>${t.close}</button>
     </div>
+    <button type="button" data-reader-toc>${t.toc}</button>
     <details data-search>
       <summary>${t.search}</summary>
       <form data-search-form>
@@ -236,6 +237,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
   let selected;
   let draft;
   const mouseSelecting = new WeakSet();
+  const touchInput = new WeakSet();
   const confirmation = document.createElement('div');
   confirmation.className = 'highlight-confirmation';
   confirmation.hidden = true;
@@ -278,6 +280,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     showPanel(true);
     query('[data-close]').focus();
   };
+  query('[data-reader-toc]').onclick = () => root.querySelector('#toc').click();
   query('[data-library]').onclick = () => root.querySelector('#back').click();
   query('[data-close]').onclick = () => {
     showPanel(false);
@@ -307,6 +310,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       touches[0].clientY - touches[1].clientY,
     );
     target.addEventListener('touchstart', event => {
+      if (contents) touchInput.add(contents);
       touchPress = null;
       if (event.touches.length === 1 && !pinch) {
         const point = event.touches[0];
@@ -338,7 +342,10 @@ export function attachReaderTools({root, book, rendition, language, direction, p
           const scroller = rendition.manager.container;
           const top = scroller.scrollTop;
           scroller.scrollTop += (touchPress.lastY ?? touchPress.screenY) - point.screenY;
-          if (scroller.scrollTop !== top) progress.followScroll = true;
+          if (scroller.scrollTop !== top) {
+            progress.clearZoomEdge();
+            progress.followScroll = true;
+          }
           touchPress.scrolling = true;
           touchPress.lastY = point.screenY;
         } else if (Math.hypot(dx, dy) > 18) {
@@ -431,6 +438,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     if (progress.continuous) {
       contents.document.addEventListener('pointerdown', event => {
         if (event.pointerType === 'touch' || event.button !== 0) return;
+        touchInput.delete(contents);
         mouseSelecting.add(contents);
       });
       const finishMouseSelection = () => {
@@ -464,7 +472,10 @@ export function attachReaderTools({root, book, rendition, language, direction, p
         const top = scroller.scrollTop;
         const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? scroller.clientHeight : 1;
         scroller.scrollTop += event.deltaY * scale;
-        if (scroller.scrollTop !== top) progress.followScroll = true;
+        if (scroller.scrollTop !== top) {
+            progress.clearZoomEdge();
+            progress.followScroll = true;
+          }
       }, {passive: false});
     }
     const spacing = book.layout.spacing;
@@ -667,6 +678,13 @@ export function attachReaderTools({root, book, rendition, language, direction, p
     const selectionInBook = contents.window?.getSelection();
     const text = selectionInBook?.toString().trim();
     if (!text || !selectionInBook.rangeCount) return;
+    if (selection && touchInput.has(contents)) {
+      if (selection.active) return;
+      draft = null;
+      selection.start(contents, selectionInBook.getRangeAt(0));
+      selectionInBook.removeAllRanges();
+      return;
+    }
     if (selection?.active) selection.clear();
     draft = {cfi: contents.cfiFromRange(selectionInBook.getRangeAt(0)), text, contents};
     showConfirmation(true);

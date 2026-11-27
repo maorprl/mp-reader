@@ -43,11 +43,14 @@ export function createReaderSelection({stage, viewport, rendition, progress, sig
     if (drag) {
       const above = visible.top + edge - drag.y;
       const below = drag.y - (visible.bottom - edge);
-      const speed = below > 0 ? Math.min(12, below / 4) : above > 0 ? -Math.min(12, above / 4) : 0;
-      if (speed) {
+      const speed = below > 0 ? Math.min(4, below / 10) : above > 0 ? -Math.min(4, above / 10) : 0;
+      if (speed && !drag.releasing) {
         const top = scroller.scrollTop;
         scroller.scrollTop += speed;
-        if (scroller.scrollTop !== top) progress.followScroll = true;
+        if (scroller.scrollTop !== top) {
+          progress.clearZoomEdge();
+          progress.followScroll = true;
+        }
       }
       const y = Math.max(visible.top + 3, Math.min(visible.bottom - 3, drag.y));
       const x = Math.max(visible.left + 3, Math.min(visible.right - 3, drag.x));
@@ -55,14 +58,19 @@ export function createReaderSelection({stage, viewport, rendition, progress, sig
         const rect = contents.window.frameElement?.getBoundingClientRect();
         return rect && y >= rect.top && y < rect.bottom;
       });
-      if (contents) {
+      if (contents && drag.moved) {
+        drag.moved = false;
         const rect = contents.window.frameElement.getBoundingClientRect();
         const doc = contents.document;
         const caret = doc.caretRangeFromPoint?.(x - rect.left, y - rect.top);
         if (caret && caret.startContainer.nodeType === Node.TEXT_NODE) {
-          const target = location(contents, caret.startContainer, caret.startOffset);
-          const order = cfiOrder.compare(target.cfi, endpoints[1 - drag.index].cfi);
-          if (drag.index === 0 ? order < 0 : order > 0) endpoints[drag.index] = target;
+          const caretRect = caret.getBoundingClientRect();
+          const localY = y - rect.top;
+          if (caretRect.height && localY >= caretRect.top - 2 && localY <= caretRect.bottom + 2) {
+            const target = location(contents, caret.startContainer, caret.startOffset);
+            const order = cfiOrder.compare(target.cfi, endpoints[1 - drag.index].cfi);
+            if (drag.index === 0 ? order < 0 : order > 0) endpoints[drag.index] = target;
+          }
         }
       }
     }
@@ -129,12 +137,20 @@ export function createReaderSelection({stage, viewport, rendition, progress, sig
       event.preventDefault();
       handle.setPointerCapture(event.pointerId);
       const rect = handle.getBoundingClientRect();
-      drag = {index, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2};
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
+      drag = {index, x, y, offsetX: x - event.clientX, offsetY: y - event.clientY};
     });
     handle.addEventListener('pointermove', event => {
       if (drag?.index !== index || !handle.hasPointerCapture(event.pointerId)) return;
-      Object.assign(drag, {x: event.clientX, y: event.clientY});
+      Object.assign(drag, {x: event.clientX + drag.offsetX, y: event.clientY + drag.offsetY, moved: true});
       schedule();
+    });
+    handle.addEventListener('pointerup', () => {
+      if (drag?.index !== index || !drag.moved) return;
+      cancelAnimationFrame(frame);
+      drag.releasing = true;
+      repaint();
     });
     handle.addEventListener('lostpointercapture', () => {
       drag = null;

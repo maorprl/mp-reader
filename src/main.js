@@ -326,16 +326,9 @@ function trackEpubProgress(epub, rendition, book, labels, token) {
   let location;
   let locationCount = 0;
   const readerViewport = app.querySelector('#viewport');
-  let zoomOffset;
-  function clearZoomEdge() {
+  const clearZoomEdge = progress.clearZoomEdge = () => {
     readerViewport.style.removeProperty('--zoom-clip');
-    zoomOffset = undefined;
-  }
-  if (readerViewport.classList.contains('continuous-epub')) {
-    readerViewport.addEventListener('scroll', event => {
-      if (zoomOffset !== undefined && event.target.scrollTop !== zoomOffset) clearZoomEdge();
-    }, true);
-  }
+  };
 
   function update() {
     if (!location?.start || token !== state.token) return false;
@@ -427,7 +420,7 @@ function trackEpubProgress(epub, rendition, book, labels, token) {
         if (lastLine) {
           const inset = Math.ceil(bounds.bottom - lastLine.top);
           readerViewport.style.setProperty('--zoom-clip', `inset(0 0 ${inset}px 0)`);
-          zoomOffset = scroller.scrollTop;
+
         }
       }
       location = rendition.currentLocation();
@@ -454,7 +447,10 @@ async function navigate(n) {
     if (!scroller?.clientHeight) return;
     const start = scroller.scrollTop;
     scroller.scrollTop = readingPageOffset(scroller, rendition.getContents(), n);
-    if (scroller.scrollTop !== start) progress.followScroll = true;
+    if (scroller.scrollTop !== start) {
+      progress.clearZoomEdge();
+      progress.followScroll = true;
+    }
     return;
   }
 
