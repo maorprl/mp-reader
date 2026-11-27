@@ -327,7 +327,9 @@
 }
 
 .continuous-epub .epub-container {
-  clip-path: var(--zoom-clip, none);
+  clip-path: var(--zoom-clip, inset(0));
+  transition: clip-path 160ms ease-out;
+  mask-image: linear-gradient(to bottom, transparent, #000 8px, #000 calc(100% - 8px), transparent);
 }
 
 .reader-tools-header {
@@ -363,4 +365,8 @@
     top: var(--desktop-reader-header);
     bottom: var(--desktop-reader-footer);
   }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .continuous-epub .epub-container { transition: none; }
 }
