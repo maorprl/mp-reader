@@ -236,18 +236,23 @@ export function attachReaderTools({root, book, rendition, language, direction, p
   confirmation.hidden = true;
   confirmation.innerHTML = `<button type="button" data-confirm>${t.save}</button>
     <button type="button" data-cancel>${t.cancel}</button><span role="status"></span>`;
-  stage.append(confirmation);
+  const summary = footerProgress.querySelector('.progress-summary');
+  summary.after(confirmation);
+  function showConfirmation(show) {
+    confirmation.hidden = !show;
+    summary.hidden = show;
+  }
 
   const selection = progress.continuous && createReaderSelection({
     stage, viewport, rendition, progress, signal, labels: t.selectionHandles,
-    onChange: active => { confirmation.hidden = !active; },
+    onChange: showConfirmation,
   });
 
   function clearDraft() {
     draft?.contents.window.getSelection()?.removeAllRanges();
     draft = null;
     selection?.clear?.();
-    confirmation.hidden = true;
+    showConfirmation(false);
     confirmation.querySelector('span').textContent = '';
   }
   let searchSequence = 0;
@@ -411,7 +416,6 @@ export function attachReaderTools({root, book, rendition, language, direction, p
   }
 
   bindPageTaps(stage, null, {signal});
-  if (!progress.continuous) rendition.on('relocated', clearDraft);
   window.addEventListener('keydown', handleKeys, {signal});
   rendition.on('keydown', handleKeys);
   rendition.hooks.content.register(contents => {
@@ -574,7 +578,6 @@ export function attachReaderTools({root, book, rendition, language, direction, p
 
   const highlightForm = query('[data-highlight-form]');
   function openHighlightEditor(entry) {
-    clearDraft();
     selected = entry;
     highlightForm.querySelector('blockquote').textContent = entry.text;
     highlightForm.querySelector('textarea').value = entry.note || '';
@@ -655,7 +658,7 @@ export function attachReaderTools({root, book, rendition, language, direction, p
       return;
     }
     draft = {cfi: contents.cfiFromRange(selectionInBook.getRangeAt(0)), text, contents};
-    confirmation.hidden = false;
+    showConfirmation(true);
   }
   rendition.on('selected', (_cfi, contents) => captureSelection(contents));
   const confirm = confirmation.querySelector('[data-confirm]');
